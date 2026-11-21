@@ -1,18 +1,22 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
+import re
 import threading
 import unittest
 from uuid import uuid4
 
 from codejam16.live import FeedState
-from codejam16.web.app import create_app
+from codejam16.web.app import create_app, lan_address
 
 
-def join(client, token):
-    response = client.post(f"/join/{token}")
-    state = client.get("/api/state").get_json()
-    return response, state["csrf_token"]
+FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "person-down.json"
+
+
+def join(client, name="Ada"):
+    response = client.post("/join", data={"name": name})
+    state = client.get("/api/state").get_json() if response.status_code == 302 else {}
+    return response, state.get("csrf_token", "")
 
 
 class WebTestCase(unittest.TestCase):
@@ -33,7 +37,7 @@ class AppWiringTests(WebTestCase):
         feed = FeedState()
         feed.update(status="live", label="Live camera", fps=12.5)
         client = self.make_app(feed=feed).test_client()
-        join(client, "responder-ada")
+        join(client)
         state = client.get("/api/state").get_json()
         self.assertEqual(state["feed"]["status"], "live")
         self.assertEqual(state["feed"]["fps"], 12.5)
@@ -41,13 +45,20 @@ class AppWiringTests(WebTestCase):
 
     def test_default_feed_is_rehearsal_mode(self):
         client = self.make_app().test_client()
-        join(client, "responder-ada")
+        join(client)
         self.assertEqual(client.get("/api/state").get_json()["feed"]["label"], "Rehearsal mode")
 
     def test_create_app_starts_no_worker(self):
         self.make_app()
         self.assertNotIn("detector-worker", [thread.name for thread in threading.enumerate()])
 
+    def test_no_sample_check_by_default(self):
+        client = self.make_app().test_client()
+        join(client)
+        self.assertEqual(client.get("/api/state").get_json()["checks"], [])
+
+    def test_lan_address_is_an_ip(self):
+        self.assertRegex(lan_address(), r"^\d+\.\d+\.\d+\.\d+$")
 
 
 class LaunchTests(unittest.TestCase):
@@ -57,8 +68,79 @@ class LaunchTests(unittest.TestCase):
             predictor_loader(Path("/nonexistent/missing.pt"))()
 
 
+class JoinTests(WebTestCase):
+    def setUp(self):
+        super().setUp()
+        self.app = self.make_app()
 
-FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "person-down.json"
+    def test_join_page_shows_name_form_only(self):
+        body = self.app.test_client().get("/join").get_data(as_text=True)
+        self.assertIn('name="name"', body)
+        self.assertNotIn("Supervisor", body)
+
+    def test_old_token_link_shows_form(self):
+        response = self.app.test_client().get("/join/responder-ada")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('name="name"', response.get_data(as_text=True))
+
+    def test_join_sets_cookie_and_lands_on_checks(self):
+        response = self.app.test_client().post("/join", data={"name": "Alex"})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/"))
+        cookie = response.headers["Set-Cookie"]
+        self.assertIn("codejam_staff=", cookie)
+        self.assertIn("HttpOnly", cookie)
+
+    def test_blank_name_creates_nobody(self):
+        client = self.app.test_client()
+        response = client.post("/join", data={"name": "   "})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('name="name"', response.get_data(as_text=True))
+        self.assertNotIn("Set-Cookie", response.headers)
+        self.assertEqual(client.get("/api/state").status_code, 302)
+
+    def test_cross_origin_join_403(self):
+        client = self.app.test_client()
+        response = client.post("/join", data={"name": "Alex"}, headers={"Origin": "http://evil.test"})
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn("Set-Cookie", response.headers)
+
+    def test_refresh_keeps_person(self):
+        client = self.app.test_client()
+        join(client, "Alex")
+        first = client.get("/api/state").get_json()["viewer"]
+        second = client.get("/api/state").get_json()["viewer"]
+        self.assertEqual((first["name"], first["id"]), (second["name"], second["id"]))
+        self.assertEqual(first["name"], "Alex")
+
+    def test_other_phone_unchanged_after_rejoin(self):
+        alex, jordan = self.app.test_client(), self.app.test_client()
+        join(alex, "Alex")
+        join(jordan, "Jordan")
+        before = jordan.get("/api/state").get_json()["viewer"]
+        alex.post("/join", data={"name": "Sam"})
+        self.assertEqual(jordan.get("/api/state").get_json()["viewer"], before)
+        self.assertEqual(alex.get("/api/state").get_json()["viewer"]["name"], "Sam")
+
+    def test_stale_cookie_redirects_to_join(self):
+        client = self.app.test_client()
+        client.set_cookie("codejam_staff", "bogus")
+        response = client.get("/")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/join"))
+
+    def test_checks_and_map_routes_serve_app(self):
+        client = self.app.test_client()
+        join(client)
+        for path, tab in (("/", "checks"), ("/map", "map")):
+            response = client.get(path)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(f'data-initial-tab="{tab}"', response.get_data(as_text=True))
+
+    def test_change_name_page_prefills_current_name(self):
+        client = self.app.test_client()
+        join(client, "Alex")
+        self.assertIn('value="Alex"', client.get("/join").get_data(as_text=True))
 
 
 class WorkflowTests(WebTestCase):
@@ -74,37 +156,21 @@ class WorkflowTests(WebTestCase):
                            json={"action": action, "outcome": outcome},
                            headers={"X-CSRF-Token": csrf, **(headers or {})})
 
-    def test_valid_join_sets_cookie_and_redirects(self):
-        response = self.app.test_client().post("/join/responder-ada")
-        self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.headers["Location"].endswith("/"))
-        cookie = response.headers["Set-Cookie"]
-        self.assertIn("codejam_staff=", cookie)
-        self.assertIn("HttpOnly", cookie)
-
-    def test_invalid_join_404(self):
-        self.assertEqual(self.app.test_client().get("/join/nope").status_code, 404)
-
     def test_action_without_csrf_403(self):
         client = self.app.test_client()
-        join(client, "responder-ada")
+        join(client)
         self.assertEqual(self.act(client, "", "accept").status_code, 403)
 
     def test_action_bad_origin_403(self):
         client = self.app.test_client()
-        _, csrf = join(client, "responder-ada")
+        _, csrf = join(client)
         response = self.act(client, csrf, "accept", headers={"Origin": "http://evil.test"})
         self.assertEqual(response.status_code, 403)
 
-    def test_supervisor_action_409(self):
-        client = self.app.test_client()
-        _, csrf = join(client, "supervisor-morgan")
-        self.assertEqual(self.act(client, csrf, "accept").status_code, 409)
-
-    def test_two_clients_race_one_owner(self):
+    def test_two_clients_race_one_owner_and_loser_sees_winner(self):
         ada, jordan = self.app.test_client(), self.app.test_client()
-        _, ada_csrf = join(ada, "responder-ada")
-        _, jordan_csrf = join(jordan, "responder-jordan")
+        _, ada_csrf = join(ada, "Ada")
+        _, jordan_csrf = join(jordan, "Jordan")
         barrier = threading.Barrier(2)
         responses = {}
 
@@ -113,29 +179,39 @@ class WorkflowTests(WebTestCase):
             responses[name] = self.act(client, csrf, "accept")
 
         threads = [threading.Thread(target=claim, args=args)
-                   for args in (("ada", ada, ada_csrf), ("jordan", jordan, jordan_csrf))]
+                   for args in (("Ada", ada, ada_csrf), ("Jordan", jordan, jordan_csrf))]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
-        codes = sorted(response.status_code for response in responses.values())
-        self.assertEqual(codes, [200, 409])
+        self.assertEqual(sorted(response.status_code for response in responses.values()), [200, 409])
         winner = next(name for name, response in responses.items() if response.status_code == 200)
-        loser = responses["jordan" if winner == "ada" else "ada"].get_json()
-        self.assertEqual(loser["check"]["owner_name"], {"ada": "Ada Chen", "jordan": "Jordan Lee"}[winner])
+        loser = "Jordan" if winner == "Ada" else "Ada"
+        self.assertEqual(responses[loser].get_json()["error"], f"{winner} accepted this first.")
 
     def test_refresh_keeps_owner(self):
         client = self.app.test_client()
-        _, csrf = join(client, "responder-ada")
+        _, csrf = join(client)
         self.act(client, csrf, "accept")
         state = client.get("/api/state").get_json()
         check = next(item for item in state["checks"] if item["id"] == self.check_id)
         self.assertEqual(check["owner_id"], state["viewer"]["id"])
         self.assertEqual(check["status"], "accepted")
 
+    def test_rejoin_same_browser_renames_and_keeps_ownership(self):
+        client = self.app.test_client()
+        _, csrf = join(client, "Ada")
+        self.act(client, csrf, "accept")
+        client.post("/join", data={"name": "Sam"})
+        csrf = client.get("/api/state").get_json()["csrf_token"]
+        self.assertEqual(self.act(client, csrf, "arrive").status_code, 200)
+        state = client.get("/api/state").get_json()
+        check = next(item for item in state["checks"] if item["id"] == self.check_id)
+        self.assertEqual((check["owner_name"], check["status"]), ("Sam", "arrived"))
+
     def test_resolved_moves_to_recent(self):
         client = self.app.test_client()
-        _, csrf = join(client, "responder-ada")
+        _, csrf = join(client)
         for action in ("accept", "arrive"):
             self.assertEqual(self.act(client, csrf, action).status_code, 200)
         self.assertEqual(self.act(client, csrf, "resolve", "False alarm").status_code, 200)
