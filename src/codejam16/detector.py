@@ -67,7 +67,7 @@ class PersonDownDetector:
         *,
         floor_box,
         camera_id="demo-camera",
-        zone_id="demo-area",
+        zone_id="east-bar",
         source="replay",
         confirmation_seconds=2.0,
         rearm_seconds=2.0,

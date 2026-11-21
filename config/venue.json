@@ -1,0 +1,20 @@
+{
+  "zones": {
+    "east-bar": {"name": "East bar", "landmark": "Beside the side stairs", "map_x": 241, "map_y": 118},
+    "main-floor": {"name": "Main floor", "landmark": "Near the north tables", "map_x": 592, "map_y": 274}
+  },
+  "cameras": {
+    "demo-camera": {
+      "zone_id": "east-bar",
+      "floor_box": [0.10, 0.62, 0.95, 0.98],
+      "detector": {
+        "confirmation_seconds": 2.0,
+        "rearm_seconds": 2.0,
+        "down_angle_degrees": 30,
+        "upright_angle_degrees": 60,
+        "minimum_keypoint_confidence": 0.4,
+        "maximum_observation_gap_ms": 500
+      }
+    }
+  }
+}

@@ -41,7 +41,7 @@ def _parse_args(argv):
         help="Floor rectangle as fractions of frame width and height",
     )
     parser.add_argument("--camera-id", default="demo-camera")
-    parser.add_argument("--zone-id", default="demo-area")
+    parser.add_argument("--zone-id", default="east-bar")
     parser.add_argument("--confirmation-seconds", type=float, default=2.0)
     parser.add_argument("--rearm-seconds", type=float, default=2.0)
     parser.add_argument("--maximum-observation-gap-ms", type=float, default=500)

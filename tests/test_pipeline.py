@@ -20,7 +20,7 @@ def samples(frame, start, end):
 
 def pipeline():
     return PersonDownPipeline(lambda frame: frame.results, camera_id="demo-camera",
-                              zone_id="demo-area", floor_box=FLOOR_BOX)
+                              zone_id="east-bar", floor_box=FLOOR_BOX)
 
 
 class PipelineTests(unittest.TestCase):

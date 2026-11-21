@@ -2,7 +2,7 @@
   "episode_id": "fixture-person-down-001",
   "signal": "person_down",
   "camera_id": "demo-camera",
-  "zone_id": "demo-area",
+  "zone_id": "east-bar",
   "detected_at": "2026-01-01T00:00:00Z",
   "source": "replay"
 }
