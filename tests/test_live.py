@@ -9,7 +9,7 @@ from codejam16.capture import CapturedFrame, CaptureOpenError, LiveFeedLost
 from codejam16.live import DetectorWorker, FeedState
 from codejam16.store import IncidentStore
 from codejam16.venue import Camera, Venue, Zone
-from test_detector import DOWN, FLOOR_BOX, SITTING
+from test_detector import DOWN, FLOOR_BOX, SITTING, UPRIGHT
 
 
 VENUE = Venue(
@@ -82,7 +82,7 @@ class DetectorWorkerTests(unittest.TestCase):
         self.run_worker(self.worker(
             events.append, feed, camera_index=1, fallback_clip=Path("clip.mov"),
             open_camera=opener(samples(DOWN, 0, 1500), then_raise=LiveFeedLost("gone")),
-            open_replay=opener(samples(DOWN, 0, 1000))))
+            open_replay=opener(samples(DOWN, 1500, 2500))))
         self.assertEqual(events, [])
         self.assertEqual(feed.snapshot()["status"], "finished")
 
@@ -168,6 +168,39 @@ class DetectorWorkerTests(unittest.TestCase):
         snapshot = feed.snapshot()
         self.assertGreater(snapshot["fps"], 0)
         self.assertTrue(snapshot["last_frame_at"].endswith("Z"))
+
+
+class StaffResolveTests(unittest.TestCase):
+    ADA = {"id": "responder-ada", "name": "Ada Chen", "role": "responder"}
+
+    def run_with_staff(self, after_resolve):
+        with TemporaryDirectory() as directory:
+            store = IncidentStore(str(Path(directory) / "staff.sqlite3"))
+
+            def frames():
+                yield from samples(DOWN, 0, 3000)
+                (check_id,) = [check["id"] for check in store.snapshot(self.ADA, {})["checks"]]
+                for action in ("accept", "arrive"):
+                    store.transition(check_id, self.ADA, action)
+                store.transition(check_id, self.ADA, "resolve", "Confirmed person down")
+                yield from after_resolve
+
+            @contextmanager
+            def open_replay(*args, **kwargs):
+                yield frames()
+
+            worker = DetectorWorker(venue=VENUE, camera_id="demo-camera", deliver=store.create_incident,
+                                    feed=FeedState(), load_predictor=predictor, replay_path=Path("clip.mov"),
+                                    open_replay=open_replay, sleep=lambda seconds: None)
+            with redirect_stderr(StringIO()):
+                worker.run()
+            return store.count()
+
+    def test_still_down_after_resolve_creates_no_new_check(self):
+        self.assertEqual(self.run_with_staff(samples(DOWN, 3000, 8000)), 1)
+
+    def test_upright_then_down_again_creates_second_check(self):
+        self.assertEqual(self.run_with_staff(samples(UPRIGHT, 3000, 6000) + samples(DOWN, 6000, 9000)), 2)
 
 
 class FeedStateTests(unittest.TestCase):

@@ -61,6 +61,7 @@
   const zones = () => snapshot?.zones || [];
   const zoneName = (id) => zones().find((zone) => zone.id === id)?.name || id;
   const firstSeen = new Map();
+  let initialSnapshotSeen = false;
   const owner = (check) => check.owner_name || 'Waiting for someone to help';
   const checks = () => snapshot?.checks || [];
   const user = () => snapshot?.viewer || {};
@@ -240,7 +241,7 @@
         <div class="detail-title"><div class="signal-icon">${markerIcon()}</div><div><h2>Possible person down</h2><p>${esc(status)}${check.overdue ? ' · Overdue' : ''}</p></div></div>
         <div class="detail-alert"><span class="alert-mark">i</span><span>The camera noticed someone may be down. Please check in and decide what support is needed.</span></div>
         <div class="detail-section"><div class="detail-section-title">LOCATION</div><div class="location-line"><div class="location-icon">${markerIcon()}</div><div class="location-copy"><strong>${esc(check.zone_name)}</strong><span>${esc(check.landmark)}</span></div></div></div>
-        <div class="detail-section"><div class="detail-facts"><div><span class="fact-label">DETECTED</span><span class="fact-value">${esc(date(check.detected_at))} <span style="color:#9aa49d;font-weight:400">· ${esc(elapsed(check.detected_at))}</span></span></div><div><span class="fact-label">STATUS</span><span class="fact-value">${esc(status)}</span></div>${firstSeen.has(check.id) ? `<div><span class="fact-label">DETECTION → SCREEN</span><span class="fact-value">${firstSeen.get(check.id).toFixed(1)} s</span></div>` : ''}</div></div>
+        <div class="detail-section"><div class="detail-facts"><div><span class="fact-label">DETECTED</span><span class="fact-value">${esc(date(check.detected_at))} <span style="color:#9aa49d;font-weight:400">· ${esc(elapsed(check.detected_at))}</span></span></div><div><span class="fact-label">STATUS</span><span class="fact-value">${esc(status)}</span></div>${firstSeen.get(check.id) != null ? `<div><span class="fact-label">DETECTION → SCREEN</span><span class="fact-value">${firstSeen.get(check.id).toFixed(1)} s</span></div>` : ''}</div></div>
         <div class="detail-section"><div class="detail-section-title">ASSIGNED TO</div><div class="owner-row">${check.owner_name ? `<span class="avatar">${esc(initials(check.owner_name))}</span><span>${esc(check.owner_name)}</span>` : '<span class="fact-value">Waiting for someone to help</span>'}</div></div>
         <div class="detail-section"><div class="detail-section-title">CHECK HISTORY</div><div class="timeline">${renderTimeline(check)}</div></div>
         <div class="detail-actions">${actionsFor(check)}</div>
@@ -290,18 +291,17 @@
     document.getElementById('map-recent-list').innerHTML = markup;
   }
 
-  function recordFirstSeen() {
-    checks().forEach((check) => {
-      if (check.source === 'rehearsal' || firstSeen.has(check.id)) return;
-      const seconds = (Date.now() - Date.parse(check.detected_at)) / 1000;
-      firstSeen.set(check.id, seconds);
-      console.info(`Detection → screen ${check.id}: ${seconds.toFixed(2)} s`);
+  function recordFirstSeen(requestStartedMs) {
+    const before = new Set(firstSeen.keys());
+    window.CodejamLatency.measureNewChecks(firstSeen, snapshot, requestStartedMs, performance.now(), !initialSnapshotSeen);
+    initialSnapshotSeen = true;
+    firstSeen.forEach((seconds, id) => {
+      if (!before.has(id) && seconds !== null) console.info(`Detection → screen ${id}: ${seconds.toFixed(2)} s`);
     });
   }
 
   function render() {
     if (!snapshot) return;
-    recordFirstSeen();
     renderStats();
     renderQueue();
     renderDetail();
@@ -314,6 +314,7 @@
 
   async function refresh() {
     const sequence = ++requestSequence;
+    const requestStartedMs = performance.now();
     try {
       const response = await fetch('/api/state', { credentials: 'same-origin', cache: 'no-store' });
       if (response.status === 401 || response.redirected) { window.location.assign('/join'); return; }
@@ -323,6 +324,7 @@
       updateAlerts(next.checks);
       snapshot = next;
       csrfToken = next.csrf_token || '';
+      recordFirstSeen(requestStartedMs);
       render();
       setConnection(false);
     } catch (error) {
