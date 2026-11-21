@@ -1,24 +1,40 @@
 # CodeJam16
 
-See the [three-person implementation handoff](docs/implementation-handoff.md) for branch ownership, shared interfaces, and review steps.
+Venue welfare-check demo: a fixed camera spots a possible person down, and the
+responder queue and supervisor floor map share one check that exactly one
+responder owns. The plan is in
+[docs/superpowers/plans](docs/superpowers/plans/2026-11-21-codejam16-finish-and-demo.md).
 
-## Staff app frontend
+## Quick start
+
+Setup, once, from the repository root (Python 3.12 via [uv](https://docs.astral.sh/uv/)):
+
+```sh
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+mkdir -p local
+curl -fL -o local/yolo26n-pose.pt https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n-pose.pt
+cp ~/Downloads/laydown.MOV local/laydown.MOV   # staged replay clip, never committed
+```
+
+Test (no camera or model weights needed):
+
+```sh
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
+```
+
+Launch the staff app:
+
+```sh
+PYTHONPATH=src .venv/bin/python -m codejam16.web.app --host 0.0.0.0 --port 5000
+```
+
+## Staff app
 
 [Phone responder preview](docs/screenshots/responder.png) · [Supervisor map preview](docs/screenshots/supervisor.png)
 
 The local staff app provides a responder queue and supervisor floor view backed by
-one SQLite incident store. On first launch it seeds two clearly labeled rehearsal
-checks. The camera feed currently reports **Rehearsal mode**; the detector is not
-connected to the web app yet.
-
-Use Python 3.10 or newer from the repository root:
-
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-PYTHONPATH=src python -m codejam16.web.app --host 0.0.0.0 --port 5000
-```
+one SQLite incident store.
 
 Open `http://127.0.0.1:5000/join/responder-ada` for Ada’s responder session,
 `http://127.0.0.1:5000/join/responder-jordan` for Jordan’s separate responder
@@ -38,17 +54,9 @@ seconds).
 The demo invitation tokens above are convenient local links, not production
 credentials. Keep this app on the controlled rehearsal network.
 
-Install the capture probe dependency separately when you are ready to work on
-the camera adapter:
-
-```sh
-python -m pip install opencv-python
-```
-
 ## Capture probe on macOS
 
-The capture probe uses Python 3.10 or newer with a compatible OpenCV wheel.
-From the repository root, install OpenCV separately as shown above, then run:
+The capture probe uses the Quick start environment. From the repository root, run:
 
 ```sh
 PYTHONPATH=src python -m unittest discover -s tests -p test_capture.py
@@ -88,17 +96,8 @@ yet, or lets staff finish an existing check.
 
 ## Detector replay and live pipeline
 
-From the repository root, install the verified Python 3.12 runtime and cache the
-official pretrained weights. Keep recordings and generated traces in ignored
-`local/`.
-
-```sh
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python ultralytics==8.4.216 opencv-python==5.1.0.95 torch==2.15.0 torchvision==0.29.2
-mkdir -p local
-curl -fL -o local/yolo26n-pose.pt https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n-pose.pt
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
-```
+Use the Quick start environment and weights. Keep recordings and generated traces
+in ignored `local/`.
 
 Run a staged replay or a live Continuity Camera. The floor rectangle is normalized
 left, top, right, bottom and must be calibrated to the camera view:

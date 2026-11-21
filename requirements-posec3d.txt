@@ -1,0 +1,11 @@
+# Isolated PoseC3D experiment environment (not in demo). See README.
+mmcv-lite==2.1.0
+mmengine==0.10.7
+numpy==1.26.4
+opencv-python==4.11.0.86
+torch==2.15.0
+torchvision==0.29.2
+scipy==1.17.1
+einops==0.8.2
+importlib-metadata==10.2.0
+decord2==3.4.0
