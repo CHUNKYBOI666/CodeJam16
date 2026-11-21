@@ -2,7 +2,7 @@
 
 import argparse
 from collections import Counter
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stdout
 from functools import partial
 import json
 import math
@@ -12,6 +12,7 @@ import sys
 import time
 
 from .detector import PersonDownDetector
+from .pose_trace import PoseTrace
 
 
 class ReplayError(Exception):
@@ -43,6 +44,7 @@ def _parse_args(argv):
     parser.add_argument("--minimum-keypoint-confidence", type=float, default=0.4)
     parser.add_argument("--down-angle-degrees", type=float, default=30)
     parser.add_argument("--upright-angle-degrees", type=float, default=60)
+    parser.add_argument("--pose-trace", type=Path, help="Write an optional local pose JSONL file")
     return parser.parse_args(argv)
 
 
@@ -143,7 +145,7 @@ def _process_frames(capture, cv2, detector, maximum_observation_gap_ms):
         print("End of replay: decoder returned no more frames", file=sys.stderr)
 
 
-def _run_replay(args):
+def _run_replay(args, observe_pose=None):
     if not args.clip.is_file():
         raise ReplayError(f"clip is not a local file: {args.clip}")
     if not args.weights.is_file():
@@ -164,6 +166,7 @@ def _run_replay(args):
         minimum_keypoint_confidence=args.minimum_keypoint_confidence,
         down_angle_degrees=args.down_angle_degrees,
         upright_angle_degrees=args.upright_angle_degrees,
+        observe_pose=observe_pose,
     )
 
     try:
@@ -192,7 +195,13 @@ def _run_replay(args):
 def main(argv=None):
     args = _parse_args(argv)
     try:
-        _run_replay(args)
+        with ExitStack() as resources:
+            trace = None
+            if args.pose_trace is not None:
+                trace = PoseTrace(resources.enter_context(args.pose_trace.open("x", encoding="utf-8")))
+            _run_replay(args, observe_pose=trace)
+            if trace is not None and trace.failed:
+                return 1
     except (ReplayError, ImportError, OSError, ValueError) as error:
         print(f"Replay failed for {args.clip}: {error}", file=sys.stderr)
         return 1

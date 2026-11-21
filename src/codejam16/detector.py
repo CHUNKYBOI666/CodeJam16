@@ -16,13 +16,13 @@ def _finite_number(value, name):
     return float(value)
 
 
-def _torso_midpoints(predict_pose, frame_bgr, minimum_confidence):
+def _torso_midpoints(results, frame_bgr, minimum_confidence):
     """Extract shoulder and hip midpoints or return a reason for unknown posture."""
     if frame_bgr is None:
         return None, "missing_frame"
 
     people = []
-    for result in predict_pose(frame_bgr):
+    for result in results:
         keypoints = result.keypoints
         if keypoints is None:
             continue
@@ -75,6 +75,7 @@ class PersonDownDetector:
         minimum_keypoint_confidence=0.4,
         down_angle_degrees=30,
         upright_angle_degrees=60,
+        observe_pose=None,
     ):
         if not callable(predict_pose):
             raise ValueError("predict_pose must be callable")
@@ -110,6 +111,7 @@ class PersonDownDetector:
                 raise ValueError(f"{name} must be a nonempty string")
 
         self._predict_pose = predict_pose
+        self._observe_pose = observe_pose
         self._floor_box = (left, top, right, bottom)
         self._camera_id = camera_id
         self._zone_id = zone_id
@@ -126,9 +128,12 @@ class PersonDownDetector:
         self._latched = False
         self.last_unknown_reason = None
 
-    def _classify(self, frame_bgr):
+    def _classify(self, frame_bgr, timestamp_ms):
+        results = tuple(self._predict_pose(frame_bgr)) if frame_bgr is not None else ()
+        if self._observe_pose is not None and frame_bgr is not None:
+            self._observe_pose(timestamp_ms, frame_bgr.shape[:2], results)
         midpoints, self.last_unknown_reason = _torso_midpoints(
-            self._predict_pose, frame_bgr, self._minimum_keypoint_confidence
+            results, frame_bgr, self._minimum_keypoint_confidence
         )
         if midpoints is None:
             return "unknown"
@@ -154,7 +159,7 @@ class PersonDownDetector:
         ):
             raise ValueError("source_timestamp_ms must be nonnegative and strictly increasing")
 
-        posture = self._classify(frame_bgr)
+        posture = self._classify(frame_bgr, timestamp_ms)
         self._last_timestamp_ms = timestamp_ms
         if (
             previous_timestamp_ms is not None
