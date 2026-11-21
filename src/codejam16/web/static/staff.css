@@ -39,3 +39,12 @@
 /* Keep the whole map marker a steady tap target. */
 .pin-pulse {animation: none}
 .pin-count {pointer-events: none}
+
+/* Locked mockup states: teal while a check is Accepted or Arrived ("Being resolved"). */
+.status-dot.accepted, .status-dot.arrived,
+.map-row-indicator.accepted, .map-row-indicator.arrived, .legend-resolving {background:#0f766e}
+.map-pin-group.resolving .pin-dot {fill:#0f766e}
+.map-pin-group.resolving .pin-shadow {stroke:#7fb8ae}
+.map-pin-group.overdue .pin-shadow {stroke:#aa5446; stroke-width:4}
+.zone-dot-active {background:#d97662}
+.zone-dot-resolving {background:#0f766e}

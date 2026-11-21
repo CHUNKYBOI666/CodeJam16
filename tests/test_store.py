@@ -135,5 +135,15 @@ class CreateTests(StoreTestCase):
         self.assertFalse(store.snapshot(ADA, {})["checks"][0]["overdue"])
 
 
+
+class SeedTests(StoreTestCase):
+    def test_seed_demo_only_main_floor_sample(self):
+        self.store.seed_demo()
+        checks = self.store.snapshot(ADA, {})["checks"]
+        self.assertEqual([(check["zone_id"], check["source"]) for check in checks],
+                         [("main-floor", "rehearsal")])
+        self.assertTrue(checks[0]["overdue"])
+
+
 if __name__ == "__main__":
     unittest.main()

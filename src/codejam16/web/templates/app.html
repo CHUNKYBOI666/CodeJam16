@@ -27,8 +27,7 @@
         <a href="/" class="nav-item" data-nav="queue"><span class="nav-icon icon-inbox"></span><span>Welfare checks</span><span class="nav-count" id="nav-queue-count">—</span></a>
         <div class="nav-divider"></div>
         <div class="nav-caption nav-caption-spaced">VENUE</div>
-        <div class="zone-nav"><span class="zone-dot zone-dot-teal"></span><span>East bar</span><span class="zone-camera">CAM 01</span></div>
-        <div class="zone-nav"><span class="zone-dot zone-dot-slate"></span><span>Main floor</span><span class="zone-camera">CAM 01</span></div>
+        <div id="zone-nav-list"></div>
       </nav>
       <div class="sidebar-bottom">
         <div class="connection-card"><span class="connection-led"></span><div><strong id="feed-label">Connecting…</strong><small id="feed-detail">Checking venue signal</small></div><span class="connection-menu">···</span></div>
@@ -97,11 +96,10 @@
                 <path d="M50 324h180v36H50z" fill="#e8efea" stroke="#cfdad0"/><path d="M62 332h155" stroke="#ccd7cd" stroke-width="2"/><path d="M62 342h155" stroke="#ccd7cd" stroke-width="2"/><path d="M62 352h155" stroke="#ccd7cd" stroke-width="2"/>
                 <path d="M416 45v335" stroke="#fafbf8" stroke-width="12"/><path d="M416 45v335" stroke="#d4ded6" stroke-width="1.5" stroke-dasharray="5 7"/>
                 <text x="76" y="164" class="map-room-label">EAST BAR</text><text x="304" y="139" class="map-room-label">LOUNGE</text><text x="523" y="187" class="map-room-label">NORTH TABLES</text><text x="521" y="365" class="map-room-label">MAIN FLOOR</text><text x="75" y="387" class="map-small-label">SIDE STAIRS</text>
-                <g class="map-pin-group" data-zone="east-bar" tabindex="0" role="button" aria-label="East bar checks"><circle class="pin-pulse" cx="241" cy="118" r="29"/><circle class="pin-shadow" cx="241" cy="118" r="18"/><circle class="pin-dot" cx="241" cy="118" r="13"/><text class="pin-count" id="pin-east-count" x="241" y="122">0</text></g>
-                <g class="map-pin-group" data-zone="main-floor" tabindex="0" role="button" aria-label="Main floor checks"><circle class="pin-pulse" cx="592" cy="274" r="29"/><circle class="pin-shadow" cx="592" cy="274" r="18"/><circle class="pin-dot" cx="592" cy="274" r="13"/><text class="pin-count" id="pin-main-count" x="592" y="278">0</text></g>
+                <g id="map-pins"></g>
                 <g class="camera-marker" transform="translate(339 45)"><circle r="12"/><path d="M-5-3h6l2-2h4v10h-12z"/><circle cx="1" cy="0" r="2"/></g>
               </svg>
-              <div class="map-legend"><span><i class="legend-dot legend-active"></i>Active check</span><span><i class="legend-dot legend-overdue"></i>Needs attention</span><span><i class="legend-camera"></i>Camera 01</span></div>
+              <div class="map-legend"><span><i class="legend-dot legend-active"></i>Needs responder</span><span><i class="legend-dot legend-overdue"></i>Overdue</span><span><i class="legend-dot legend-resolving"></i>Being resolved</span><span><i class="legend-camera"></i>Camera 01</span></div>
             </div>
           </section>
           <aside class="map-side panel"><div class="panel-heading"><div><h2>Active checks <span class="count-badge" id="map-active-count">0</span></h2><p>Tap a check to view the response.</p></div></div><div class="map-check-list" id="map-check-list"><div class="loading-state"><span class="loader"></span>Loading checks…</div></div><div class="feed-card"><div class="feed-card-top"><span class="feed-camera-icon">◉</span><span class="feed-status-tag" id="map-feed-status">CONNECTING</span></div><strong>Camera 01 · East bar</strong><span id="map-feed-detail">Checking venue signal</span><div class="feed-progress"><i id="feed-progress-bar"></i></div><small>FIXED CAMERA <span>·</span> REHEARSAL SETUP</small></div></aside>

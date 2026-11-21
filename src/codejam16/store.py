@@ -235,11 +235,7 @@ class IncidentStore:
     def seed_demo(self) -> None:
         if self.count():
             return
-        self.create_incident({"episode_id": "sample-east-bar-001", "signal": "person_down",
-                              "camera_id": "demo-camera", "zone_id": "east-bar", "zone_name": "East bar",
-                              "landmark": "Beside the side stairs", "source": "rehearsal",
-                              "detected_at": iso(utc_now() - timedelta(minutes=4))})
         self.create_incident({"episode_id": "sample-main-floor-002", "signal": "person_down",
                               "camera_id": "demo-camera", "zone_id": "main-floor", "zone_name": "Main floor",
                               "landmark": "Near the north tables", "source": "rehearsal",
-                              "detected_at": iso(utc_now() - timedelta(seconds=42))})
+                              "detected_at": iso(utc_now() - timedelta(seconds=self.overdue_seconds + 30))})

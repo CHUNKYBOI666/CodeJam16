@@ -57,7 +57,10 @@
     return `${hours} hr${hours === 1 ? '' : 's'} ago`;
   };
   const initials = (name) => String(name || '?').split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
-  const statusLabel = (status) => ({ needs_responder: 'Needs responder', accepted: 'Accepted', arrived: 'Arrived', resolved: 'Resolved' })[status] || status;
+  const statusLabel = (status) => ({ needs_responder: 'Needs responder', accepted: 'Being resolved', arrived: 'Being resolved', resolved: 'Closed' })[status] || status;
+  const zones = () => snapshot?.zones || [];
+  const zoneName = (id) => zones().find((zone) => zone.id === id)?.name || id;
+  const firstSeen = new Map();
   const owner = (check) => check.owner_name || 'Waiting for someone to help';
   const checks = () => snapshot?.checks || [];
   const user = () => snapshot?.viewer || {};
@@ -81,8 +84,8 @@
   }
 
   function feedText(feed) {
-    const map = { live: ['Live camera', 'Feed connected · Camera 01'], rehearsal: ['Rehearsal mode', 'Sample checks · detector not connected'], offline: ['Camera offline', 'Existing checks remain available'] };
-    return map[feed?.status] || ['Signal unavailable', 'Check venue connection'];
+    const fps = feed?.fps ? ` · ${feed.fps} fps` : '';
+    return [feed?.label || 'Signal unavailable', `${feed?.detail || 'Check venue connection'}${fps}`];
   }
 
   function updateFeed(feed) {
@@ -90,11 +93,13 @@
     document.getElementById('feed-label').textContent = label;
     document.getElementById('feed-detail').textContent = detail;
     document.getElementById('map-feed-detail').textContent = detail;
-    document.getElementById('map-feed-status').textContent = (feed?.label || label).toUpperCase();
+    document.getElementById('map-feed-status').textContent = label.toUpperCase();
     const bar = document.getElementById('feed-progress-bar');
-    bar.style.width = feed?.status === 'live' ? '100%' : feed?.status === 'rehearsal' ? '55%' : '10%';
-    bar.style.background = feed?.status === 'offline' ? '#d58a73' : '#88aa91';
-    document.querySelector('.connection-led').classList.toggle('offline', feed?.status === 'offline');
+    const flowing = feed?.status === 'live' || feed?.status === 'replay';
+    bar.style.width = flowing ? '100%' : feed?.status === 'rehearsal' || feed?.status === 'finished' ? '55%' : '10%';
+    const down = feed?.status === 'offline' || feed?.status === 'detector_unavailable';
+    bar.style.background = down ? '#d58a73' : '#88aa91';
+    document.querySelector('.connection-led').classList.toggle('offline', down);
   }
 
   function renderStats() {
@@ -117,12 +122,46 @@
     document.getElementById('map-progress-count').textContent = progress;
     document.getElementById('map-resolved-count').textContent = resolved;
     document.getElementById('map-active-count').textContent = all.length;
-    const east = all.filter((c) => c.zone_id === 'east-bar').length;
-    const main = all.filter((c) => c.zone_id === 'main-floor').length;
-    document.getElementById('pin-east-count').textContent = east;
-    document.getElementById('pin-main-count').textContent = main;
-    document.querySelector('[data-zone="east-bar"] .pin-dot').setAttribute('fill', east ? '#d97662' : '#82a18c');
-    document.querySelector('[data-zone="main-floor"] .pin-dot').setAttribute('fill', main ? '#d97662' : '#82a18c');
+    renderZones(all);
+  }
+
+  function zoneState(list) {
+    if (list.some((check) => check.status === 'needs_responder')) return 'active';
+    return list.length ? 'resolving' : '';
+  }
+
+  function renderZones(all) {
+    const svg = 'http://www.w3.org/2000/svg';
+    const host = document.getElementById('map-pins');
+    host.replaceChildren();
+    document.getElementById('zone-nav-list').innerHTML = zones().map((zone) => {
+      const state = zoneState(all.filter((check) => check.zone_id === zone.id));
+      return `<div class="zone-nav"><span class="zone-dot ${state ? `zone-dot-${state}` : 'zone-dot-slate'}"></span><span>${esc(zone.name)}</span></div>`;
+    }).join('');
+    zones().forEach((zone) => {
+      const list = all.filter((check) => check.zone_id === zone.id);
+      const group = document.createElementNS(svg, 'g');
+      group.setAttribute('class', `map-pin-group${zoneState(list) === 'resolving' ? ' resolving' : ''}${list.some((check) => check.overdue) ? ' overdue' : ''}`);
+      group.dataset.zone = zone.id;
+      group.setAttribute('tabindex', '0');
+      group.setAttribute('role', 'button');
+      group.setAttribute('aria-label', `${zone.name} checks`);
+      [['pin-pulse', 29], ['pin-shadow', 18], ['pin-dot', 13]].forEach(([name, radius]) => {
+        const circle = document.createElementNS(svg, 'circle');
+        circle.setAttribute('class', name);
+        circle.setAttribute('cx', zone.map_x);
+        circle.setAttribute('cy', zone.map_y);
+        circle.setAttribute('r', radius);
+        group.appendChild(circle);
+      });
+      const count = document.createElementNS(svg, 'text');
+      count.setAttribute('class', 'pin-count');
+      count.setAttribute('x', zone.map_x);
+      count.setAttribute('y', zone.map_y + 4);
+      count.textContent = list.length;
+      group.appendChild(count);
+      host.appendChild(group);
+    });
   }
 
   function orderedChecks() {
@@ -201,7 +240,7 @@
         <div class="detail-title"><div class="signal-icon">${markerIcon()}</div><div><h2>Possible person down</h2><p>${esc(status)}${check.overdue ? ' · Overdue' : ''}</p></div></div>
         <div class="detail-alert"><span class="alert-mark">i</span><span>The camera noticed someone may be down. Please check in and decide what support is needed.</span></div>
         <div class="detail-section"><div class="detail-section-title">LOCATION</div><div class="location-line"><div class="location-icon">${markerIcon()}</div><div class="location-copy"><strong>${esc(check.zone_name)}</strong><span>${esc(check.landmark)}</span></div></div></div>
-        <div class="detail-section"><div class="detail-facts"><div><span class="fact-label">DETECTED</span><span class="fact-value">${esc(date(check.detected_at))} <span style="color:#9aa49d;font-weight:400">· ${esc(elapsed(check.detected_at))}</span></span></div><div><span class="fact-label">STATUS</span><span class="fact-value">${esc(status)}</span></div></div></div>
+        <div class="detail-section"><div class="detail-facts"><div><span class="fact-label">DETECTED</span><span class="fact-value">${esc(date(check.detected_at))} <span style="color:#9aa49d;font-weight:400">· ${esc(elapsed(check.detected_at))}</span></span></div><div><span class="fact-label">STATUS</span><span class="fact-value">${esc(status)}</span></div>${firstSeen.has(check.id) ? `<div><span class="fact-label">DETECTION → SCREEN</span><span class="fact-value">${firstSeen.get(check.id).toFixed(1)} s</span></div>` : ''}</div></div>
         <div class="detail-section"><div class="detail-section-title">ASSIGNED TO</div><div class="owner-row">${check.owner_name ? `<span class="avatar">${esc(initials(check.owner_name))}</span><span>${esc(check.owner_name)}</span>` : '<span class="fact-value">Waiting for someone to help</span>'}</div></div>
         <div class="detail-section"><div class="detail-section-title">CHECK HISTORY</div><div class="timeline">${renderTimeline(check)}</div></div>
         <div class="detail-actions">${actionsFor(check)}</div>
@@ -231,7 +270,7 @@
 
   function openQueueForZone(zone) {
     const target = checks().find((check) => check.zone_id === zone);
-    if (!target) { showToast(`No active checks in ${zone === 'east-bar' ? 'East bar' : 'Main floor'}.`); return; }
+    if (!target) { showToast(`No active checks in ${zoneName(zone)}.`); return; }
     queueView.classList.remove('hidden');
     mapView.classList.add('hidden');
     document.getElementById('breadcrumb-current').textContent = 'Welfare checks';
@@ -251,8 +290,18 @@
     document.getElementById('map-recent-list').innerHTML = markup;
   }
 
+  function recordFirstSeen() {
+    checks().forEach((check) => {
+      if (check.source === 'rehearsal' || firstSeen.has(check.id)) return;
+      const seconds = (Date.now() - Date.parse(check.detected_at)) / 1000;
+      firstSeen.set(check.id, seconds);
+      console.info(`Detection → screen ${check.id}: ${seconds.toFixed(2)} s`);
+    });
+  }
+
   function render() {
     if (!snapshot) return;
+    recordFirstSeen();
     renderStats();
     renderQueue();
     renderDetail();
