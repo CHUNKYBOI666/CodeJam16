@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from codejam16 import vision_cli
+from codejam16 import capture as capture_module
 from codejam16.detector import PersonDownDetector
 
 
@@ -264,7 +265,9 @@ class ReplayCliTests(unittest.TestCase):
             *extra_args,
         ]
         with (
-            patch.dict(sys.modules, {"cv2": cv2_mock}),
+            patch.object(capture_module, "cv2", cv2_mock),
+            patch.object(capture_module, "_is_bgr", side_effect=lambda frame:
+                         frame is not None and len(frame.shape) == 3 and frame.shape[2] == 3),
             patch.object(vision_cli, "_load_pose_predictor", load_pose_predictor),
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -341,7 +344,7 @@ class ReplayCliTests(unittest.TestCase):
 
         self.assertEqual((status, stdout), (1, ""))
         self.assertTrue(capture.released)
-        self.assertIn("non-BGR frame at frame 1", stderr)
+        self.assertIn("invalid BGR image at frame 1", stderr)
         self.assertNotIn("running model", stderr)
 
     def test_inference_error_exits_and_releases_capture(self):
@@ -356,7 +359,7 @@ class ReplayCliTests(unittest.TestCase):
 
         self.assertEqual((status, stdout), (1, ""))
         self.assertTrue(capture.released)
-        self.assertIn("pose processing failed at frame 1", stderr)
+        self.assertIn("Vision pipeline failed", stderr)
         self.assertIn("test inference error", stderr)
 
     def test_missing_weights_fails_before_model_load(self):
@@ -381,7 +384,7 @@ class ReplayCliTests(unittest.TestCase):
 
         self.assertEqual((status, stdout), (1, ""))
         self.assertTrue(capture.released)
-        self.assertIn("could not write event", stderr)
+        self.assertIn("delivery failed for episode", stderr)
         self.assertNotIn("Confirmed", stderr)
 
     def test_interrupt_releases_capture(self):
@@ -396,4 +399,4 @@ class ReplayCliTests(unittest.TestCase):
 
         self.assertEqual((status, stdout), (130, ""))
         self.assertTrue(capture.released)
-        self.assertIn("Replay interrupted", stderr)
+        self.assertIn("Vision pipeline interrupted", stderr)

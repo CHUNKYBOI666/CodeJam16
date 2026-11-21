@@ -45,7 +45,7 @@ before reopening the camera. At integration, the caller shows the camera as
 offline, starts labeled replay with fresh detector timing if no check exists
 yet, or lets staff finish an existing check.
 
-## Detector replay
+## Detector replay and live pipeline
 
 From the repository root, install the verified Python 3.12 runtime and cache the
 official pretrained weights. Keep recordings and generated traces in ignored
@@ -57,17 +57,42 @@ uv pip install --python .venv/bin/python ultralytics==8.4.216 opencv-python==5.1
 mkdir -p local
 curl -fL -o local/yolo26n-pose.pt https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n-pose.pt
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
+```
+
+Run a staged replay or a live Continuity Camera. The floor rectangle is normalized
+left, top, right, bottom and must be calibrated to the camera view:
+
+```sh
 PYTHONPATH=src YOLO_CONFIG_DIR="$PWD/local/ultralytics" YOLO_AUTOINSTALL=false \
   .venv/bin/python -m codejam16.vision_cli local/staged.mp4 \
   --floor-box 0.10 0.62 0.95 0.98 --pose-trace local/poses.jsonl
+PYTHONPATH=src YOLO_CONFIG_DIR="$PWD/local/ultralytics" YOLO_AUTOINSTALL=false \
+  .venv/bin/python -m codejam16.vision_cli --camera-index 1 --floor-box 0.10 0.62 0.95 0.98
 ```
 
-Calibrate the floor rectangle to the camera. Its coordinates are fractions of
-image width and height. The event stream uses stdout and diagnostics use stderr.
-The optional pose trace reuses each YOLO result. Each trace file represents one
-replay session and contains timestamps in milliseconds, image dimensions, and
-17 COCO joints with confidence. Missing or ambiguous observations are explicit.
-An existing trace file is protected from overwrite.
+The event stream uses stdout and diagnostics use stderr. The optional pose trace
+reuses each YOLO result. Each trace file represents one session and contains
+timestamps in milliseconds, image dimensions, and 17 COCO joints with confidence.
+Missing or ambiguous observations are explicit. An existing trace file is
+protected from overwrite.
+
+Choose the iPhone's device index using the capture probe above. A live command
+can explicitly specify `--fallback-clip local/rehearsal.MOV`; if startup or the
+feed fails before an alert, the pipeline starts a fresh labeled replay. After an
+alert it reports the feed offline instead. Use `--constant-fps` only when the
+clip has a verified constant rate. Events are JSON lines on stdout; status,
+confirmation offset and processed FPS are on stderr. Tune
+`--maximum-observation-gap-ms` using measured live processing intervals, then
+check that gaps still interrupt confirmation and rearm.
+
+For integration, `PersonDownPipeline.run(..., deliver=callback)` invokes the
+callback for each confirmed event. Normal callback return acknowledges delivery.
+If it raises, `DeliveryError` retains `pending_event`, including its episode ID;
+call `deliver_pending(callback)` to retry before processing additional frames.
+The caller should make delivery idempotent by episode ID. Do not start a second
+pipeline for the same camera or reinitialize it on staff resolution. The live
+camera and replay errors are surfaced to the caller. Raw video and recordings
+remain local.
 
 ## PoseC3D experiment (not in demo)
 
