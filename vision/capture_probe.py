@@ -1,7 +1,7 @@
 """Probe a camera or clip without running pose inference (Continuity Camera setup check).
 
-    python cv/capture_probe.py --source 0 --frames 120
-    python cv/capture_probe.py --source clips/lying_down_twice.mp4 --frames 30 [--constant-fps 30]
+    python vision/capture_probe.py --source 0 --frames 120
+    python vision/capture_probe.py --source clips/lying_down_twice.mp4 --frames 30 [--constant-fps 30]
 
 Prints backend, frame count, size, timestamp range and whether the image changed.
 Exit code 0 only if all requested frames arrived and the image changed.

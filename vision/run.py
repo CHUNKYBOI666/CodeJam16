@@ -1,16 +1,16 @@
 """Live person-down detector with overlay: skeleton, torso angle, floor region, timers, FPS.
 
-    python cv/run.py --source 0                     # webcam index
-    python cv/run.py --source clips/lying_down_twice.mp4    # video file, paced at real time
-    python cv/run.py --source clips/lying_down_twice.mp4 --no-show --save local/out.mp4
-    python cv/run.py --source 0 --calibrate         # click the floor polygon on the first frame
+    python vision/run.py --source 0                     # webcam index
+    python vision/run.py --source clips/lying_down_twice.mp4    # video file, paced at real time
+    python vision/run.py --source clips/lying_down_twice.mp4 --no-show --save local/out.mp4
+    python vision/run.py --source 0 --calibrate         # click the floor polygon on the first frame
 
 Output: alerts go to stdout as one JSON object per line (fields as in
 fixtures/person-down.json); all logs, including library output, go to stderr.
 
-    python cv/run.py --source 0 --no-show > local/alerts.jsonl
+    python vision/run.py --source 0 --no-show > local/alerts.jsonl
 
-Capture (cv/capture.py) keeps only the newest frame; inference always runs on that one
+Capture (vision/capture.py) keeps only the newest frame; inference always runs on that one
 and stale frames are dropped (counted on the overlay). Video files are paced at their
 media time so dropping behaves like a live camera. Use --every-frame to process every
 frame of a file instead (deterministic, not real time). Exit codes: 2 if the camera

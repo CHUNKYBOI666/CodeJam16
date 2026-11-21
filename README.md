@@ -2,6 +2,14 @@
 
 See the [implementation handoff](docs/implementation-handoff.md) for branch ownership, shared interfaces, and review steps.
 
+## Layout
+
+| Path | What | Owner |
+| --- | --- | --- |
+| `vision/` | Capture + person-down detector: camera/clip capture, pose model, posture rule, calibration, overlay, clip evaluation | David |
+| `tests/vision/` | Capture, detector and calibration tests | David |
+| `src/codejam16/web/`, `src/codejam16/store.py` | Flask + SQLite staff web app (responder queue, supervisor map) | Teammate |
+
 ## Setup (Python 3.12)
 
 ```bash
@@ -11,14 +19,14 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 ## Pose overlay
 
 ```bash
-.venv/bin/python cv/run.py --source 0                    # webcam
-.venv/bin/python cv/run.py --source clips/lying_down_twice.mp4   # recording (paced at real time)
+.venv/bin/python vision/run.py --source 0                    # webcam
+.venv/bin/python vision/run.py --source clips/lying_down_twice.mp4   # recording (paced at real time)
 ```
 
 Calibrate the floor region once per camera placement (click corners on the first frame, Enter to save to `local/calibration.json`):
 
 ```bash
-.venv/bin/python cv/run.py --source clips/lying_down_twice.mp4 --calibrate
+.venv/bin/python vision/run.py --source clips/lying_down_twice.mp4 --calibrate
 ```
 
 Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dropping), `--device cpu`,
@@ -29,7 +37,7 @@ Alerts are printed to stdout as one JSON object per line, with the fields of
 `fixtures/person-down.json`; logs go to stderr. Set the ids with `--camera-id` and `--zone-id`:
 
 ```bash
-.venv/bin/python cv/run.py --source 0 --zone-id east-bar > local/alerts.jsonl
+.venv/bin/python vision/run.py --source 0 --zone-id east-bar > local/alerts.jsonl
 ```
 
 ## Capture probe on macOS
@@ -37,8 +45,8 @@ Alerts are printed to stdout as one JSON object per line, with the fields of
 Checks that a camera or clip delivers changing frames, without running the pose model:
 
 ```bash
-.venv/bin/python cv/capture_probe.py --source clips/lying_down_twice.mp4 --frames 30
-.venv/bin/python cv/capture_probe.py --source 0 --frames 120
+.venv/bin/python vision/capture_probe.py --source clips/lying_down_twice.mp4 --frames 30
+.venv/bin/python vision/capture_probe.py --source 0 --frames 120
 ```
 
 Use a staged local clip with movement. If the decoder does not expose increasing
@@ -63,9 +71,9 @@ If wireless is unreliable, connect a data-capable USB cable, trust the Mac if
 prompted, and repeat the probe. Record the command, Python and OpenCV versions,
 camera index, transport, and result for each run. Keep clips in `clips/`.
 
-Capture (`cv/capture.py`) reports a startup failure if no usable frame arrives
+Capture (`vision/capture.py`) reports a startup failure if no usable frame arrives
 within five seconds. After startup, a failed read or a five-second gap ends the
-live source (`--stall-timeout` changes the limit); `cv/run.py` then exits with code 2.
+live source (`--stall-timeout` changes the limit); `vision/run.py` then exits with code 2.
 If the native read does not return, the caller still receives the timeout and
 can open a replay. A stuck native reader may require restarting the process
 before reopening the camera. At integration, the caller shows the camera as
@@ -76,5 +84,5 @@ yet, or lets staff finish an existing check.
 
 ```bash
 .venv/bin/python -m pytest -q
-.venv/bin/python cv/eval_clips.py    # every clip in clips/: alerts and down->alert time
+.venv/bin/python vision/eval_clips.py    # every clip in clips/: alerts and down->alert time
 ```

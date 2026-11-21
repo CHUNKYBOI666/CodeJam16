@@ -430,7 +430,7 @@ def test_standing_still_rearms():
 
 
 def test_alert_event_matches_fixture_fields():
-    fixture = json.loads((Path(__file__).parent.parent / "fixtures" / "person-down.json").read_text())
+    fixture = json.loads((Path(__file__).resolve().parents[2] / "fixtures" / "person-down.json").read_text())
     c = Clock(make()).hold(LYING, 3)
     ev = alert_event(
         c.alerts[0],

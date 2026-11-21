@@ -1,7 +1,7 @@
 """Run the detector on every clip in a folder and print a summary table.
 
-    python cv/eval_clips.py                 # all videos in clips/
-    python cv/eval_clips.py --dir local/takes --calibration local/calibration.json
+    python vision/eval_clips.py                 # all videos in clips/
+    python vision/eval_clips.py --dir local/takes --calibration local/calibration.json
 
 Every frame is processed (no dropping) using media timestamps, so results are
 deterministic and independent of laptop speed. "down->alert" is measured from the
