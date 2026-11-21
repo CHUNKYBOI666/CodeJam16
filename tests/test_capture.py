@@ -1,17 +1,27 @@
-"""Capture adapter tests that do not require a camera."""
+"""Capture tests with a fake cv2.VideoCapture (no camera, no real video).
 
+Ported from the original src/codejam16 capture adapter tests, plus cases for latest-frame
+dropping, every-frame delivery and the pre-start first frame.
+"""
+
+from __future__ import annotations
+
+import time
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from threading import Event
-from unittest import TestCase
 from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pytest
 
-from codejam16 import capture
-from codejam16.capture_cli import main
+import capture
+from capture import CaptureOpenError, CaptureReadError, FrameSource, LiveFeedLost
+from capture_probe import main as probe_main
+
+CLIP = Path(__file__)  # any existing file; VideoCapture is faked
 
 
 def image(value):
@@ -19,10 +29,11 @@ def image(value):
 
 
 class FakeVideo:
-    def __init__(self, frames=(), *, opened=True, reported_frames=0):
+    def __init__(self, frames=(), *, opened=True, reported_frames=0, fps=30.0):
         self.frames = iter(frames)
         self.opened = opened
         self.reported_frames = reported_frames
+        self.fps = fps
         self.timestamp_ms = 0
         self.released = Event()
 
@@ -32,144 +43,256 @@ class FakeVideo:
     def getBackendName(self):
         return "FAKE"
 
-    def get(self, property_id):
-        if property_id == cv2.CAP_PROP_POS_MSEC:
+    def get(self, prop):
+        if prop == cv2.CAP_PROP_POS_MSEC:
             return self.timestamp_ms
-        return self.reported_frames
+        if prop == cv2.CAP_PROP_FPS:
+            return self.fps
+        if prop == cv2.CAP_PROP_FRAME_COUNT:
+            return self.reported_frames
+        return 0
 
     def read(self):
-        next_frame = next(self.frames, None)
-        if next_frame is None:
+        nxt = next(self.frames, None)
+        if nxt is None:
             return False, None
-        value, self.timestamp_ms = next_frame
+        value, self.timestamp_ms = nxt
         return True, image(value)
 
     def release(self):
         self.released.set()
 
 
-class ReplayTests(TestCase):
-    clip = Path(__file__)
-
-    def test_media_time_decode_order_and_eof(self):
-        video = FakeVideo([(2, 80), (5, 126.5), (9, 180)], reported_frames=3)
-        with patch.object(cv2, "VideoCapture", return_value=video):
-            with capture.open_replay(self.clip) as frames:
-                samples = list(frames)
-                self.assertEqual(list(frames), [])
-        self.assertEqual([sample.timestamp_ms for sample in samples], [0, 46.5, 100])
-        self.assertEqual([int(sample.frame_bgr[0, 0, 0]) for sample in samples], [2, 5, 9])
-        self.assertEqual(samples[0].frame_bgr.shape, (2, 3, 3))
-        self.assertTrue(video.released.is_set())
-
-    def test_constant_rate_ignores_missing_backend_timestamps(self):
-        video = FakeVideo([(2, 0), (3, 0), (4, 0)])
-        with patch.object(cv2, "VideoCapture", return_value=video):
-            with capture.open_replay(self.clip, constant_fps=25) as frames:
-                self.assertEqual([frame.timestamp_ms for frame in frames], [0, 40, 80])
-
-    def test_repeated_or_invalid_media_time_is_an_error(self):
-        for timestamp_ms in (0, -1, float("nan")):
-            with self.subTest(timestamp_ms=timestamp_ms):
-                video = FakeVideo([(2, 0), (3, timestamp_ms)])
-                with patch.object(cv2, "VideoCapture", return_value=video):
-                    with self.assertRaises(capture.CaptureReadError):
-                        with capture.open_replay(self.clip) as frames:
-                            list(frames)
-                self.assertTrue(video.released.is_set())
-
-    def test_failed_open_and_early_decoder_stop_are_distinct(self):
-        video = FakeVideo(opened=False)
-        with patch.object(cv2, "VideoCapture", return_value=video):
-            with self.assertRaises(capture.CaptureOpenError):
-                with capture.open_replay(self.clip):
-                    pass
-        self.assertTrue(video.released.is_set())
-
-        video = FakeVideo([(2, 0)], reported_frames=2)
-        with patch.object(cv2, "VideoCapture", return_value=video):
-            with capture.open_replay(self.clip) as frames:
-                next(frames)
-                with self.assertRaisesRegex(capture.CaptureReadError, "1 of 2"):
-                    next(frames)
-
-    def test_cli_reports_change_and_fails_on_short_or_static_clip(self):
-        for pixels, status in (([1, 2], 0), ([1, 1], 1), ([1], 1)):
-            with self.subTest(pixels=pixels):
-                video = FakeVideo([(value, i * 40) for i, value in enumerate(pixels)])
-                out = StringIO()
-                with patch.object(cv2, "VideoCapture", return_value=video), redirect_stdout(out):
-                    self.assertEqual(main(["--file", str(self.clip), "--frames", "2"]), status)
-                self.assertIn("backend=FAKE", out.getvalue())
-                self.assertIn(f"frames={len(pixels)}/2", out.getvalue())
+def replay(video, **kw):
+    kw.setdefault("realtime", False)
+    with patch.object(cv2, "VideoCapture", return_value=video):
+        src = FrameSource(CLIP, **kw)
+        src.wait_ready()
+    return src
 
 
-class CameraTests(TestCase):
-    def test_latest_frame_replaces_unread_frames_and_disconnect_is_reported(self):
-        first_delivered = Event()
-        latest_published = Event()
-        disconnect = Event()
-        self.addCleanup(disconnect.set)
-        self.addCleanup(first_delivered.set)
+def drain(src):
+    src.start()
+    out = []
+    while (f := src.latest()) is not None:
+        out.append(f)
+    return out
 
-        def images():
-            yield 1, 0
-            first_delivered.wait(2)
-            yield 2, 0
-            yield 3, 0
-            latest_published.set()
-            disconnect.wait(2)
 
-        video = FakeVideo(images())
-        with patch.object(cv2, "VideoCapture", return_value=video) as factory:
-            with capture.open_camera(2) as frames:
-                first = next(frames)
-                first_delivered.set()
-                self.assertTrue(latest_published.wait(2))
-                latest = next(frames)
-                disconnect.set()
-                with self.assertRaises(capture.LiveFeedLost):
-                    next(frames)
+# ---------------------------------------------------------------- replay
+
+
+def test_media_time_relative_to_first_frame_and_eof():
+    video = FakeVideo([(2, 80), (5, 126.5), (9, 180)], reported_frames=3)
+    with replay(video) as src:
+        assert src.backend == "FAKE"
+        assert int(src.first_frame[0, 0, 0]) == 2 and (src.width, src.height) == (3, 2)
+        frames = drain(src)
+        assert src.latest() is None
+    assert [f.ts_ms for f in frames] == [0, 46.5, 100]
+    assert [int(f.image[0, 0, 0]) for f in frames] == [2, 5, 9]
+    assert [f.seq for f in frames] == [0, 1, 2]
+    assert video.released.wait(2)
+
+
+def test_constant_fps_ignores_backend_timestamps():
+    video = FakeVideo([(2, 0), (3, 0), (4, 0)])
+    with replay(video, constant_fps=25) as src:
+        assert [f.ts_ms for f in drain(src)] == [0, 40, 80]
+
+
+@pytest.mark.parametrize("bad_ms", [0, -1, float("nan")])
+def test_repeated_or_invalid_media_time_is_an_error(bad_ms):
+    video = FakeVideo([(2, 0), (3, bad_ms)])
+    with replay(video) as src:
+        with pytest.raises(CaptureReadError, match="timestamp"):
+            drain(src)
+    assert video.released.wait(2)
+
+
+def test_failed_open_is_capture_open_error():
+    video = FakeVideo(opened=False)
+    with pytest.raises(CaptureOpenError):
+        replay(video)
+    assert video.released.wait(2)
+
+
+def test_missing_file_is_capture_open_error():
+    with pytest.raises(CaptureOpenError):
+        FrameSource("does/not/exist.mp4")
+
+
+def test_empty_clip_is_read_error():
+    with pytest.raises(CaptureReadError, match="no readable frames"):
+        replay(FakeVideo([]))
+
+
+def test_early_decoder_stop_is_distinct_from_eof():
+    video = FakeVideo([(2, 0)], reported_frames=2)
+    with replay(video) as src:
+        src.start()
+        assert src.latest().seq == 0
+        with pytest.raises(CaptureReadError, match="1 of 2"):
+            src.latest()
+
+
+def test_invalid_image_is_read_error():
+    video = FakeVideo([(2, 0)])
+    video.read = lambda: (True, np.zeros((2, 3), np.uint8))  # grayscale, not BGR
+    with pytest.raises(CaptureReadError, match="BGR"):
+        replay(video)
+
+
+def test_every_frame_mode_never_drops():
+    video = FakeVideo([(i, i * 10) for i in range(50)])
+    with replay(video) as src:
+        src.start()
+        got = []
+        while (f := src.latest()) is not None:
+            time.sleep(0.001)  # slow consumer
+            got.append(f.seq)
+    assert got == list(range(50)) and src.dropped == 0
+
+
+def test_realtime_replay_drops_stale_frames_for_slow_consumer():
+    # 100 frames at 200 fps (0.5 s of media); consumer takes ~20 ms per frame.
+    video = FakeVideo([(i % 255, i * 5) for i in range(100)])
+    with replay(video, realtime=True) as src:
+        src.start()
+        got = []
+        while (f := src.latest()) is not None:
+            time.sleep(0.02)
+            got.append(f.seq)
+    assert src.dropped > 50
+    assert got == sorted(got) and got[0] == 0
+    assert len(got) + src.dropped == 100
+
+
+def test_nothing_delivered_before_start():
+    video = FakeVideo([(1, 0), (2, 10)])
+    with replay(video) as src:
+        time.sleep(0.05)
+        assert src._pending is None  # held until start()
+
+
+def test_constant_fps_rejected_for_camera_and_bad_values():
+    with pytest.raises(ValueError):
+        FrameSource(0, constant_fps=30)
+    with pytest.raises(ValueError):
+        FrameSource(CLIP, constant_fps=0)
+    with pytest.raises(ValueError):
+        FrameSource(-1)
+
+
+# ---------------------------------------------------------------- probe CLI
+
+
+@pytest.mark.parametrize("pixels,status", [([1, 2], 0), ([1, 1], 1), ([1], 1)])
+def test_probe_reports_change_and_fails_on_short_or_static_clip(pixels, status):
+    video = FakeVideo([(v, i * 40) for i, v in enumerate(pixels)])
+    out = StringIO()
+    with patch.object(cv2, "VideoCapture", return_value=video), redirect_stdout(out):
+        assert probe_main(["--source", str(CLIP), "--frames", "2"]) == status
+    assert "backend=FAKE" in out.getvalue()
+    assert f"frames={len(pixels)}/2" in out.getvalue()
+
+
+# ---------------------------------------------------------------- camera
+
+
+def camera(video, index=2, **kw):
+    with patch.object(cv2, "VideoCapture", return_value=video) as factory:
+        src = FrameSource(index, **kw)
+        src.wait_ready()
+    return src, factory
+
+
+def test_camera_latest_frame_replaces_unread_and_disconnect_is_reported():
+    second_read = Event()
+    latest_published = Event()
+    disconnect = Event()
+
+    def images():
+        yield 0, 0  # first frame (size / warmup), not delivered after start
+        yield 1, 0
+        second_read.wait(2)
+        yield 2, 0
+        yield 3, 0
+        latest_published.set()
+        disconnect.wait(2)
+
+    video = FakeVideo(images())
+    try:
+        src, factory = camera(video)
+        with src:
+            src.start()
+            first = src.latest()
+            second_read.set()
+            assert latest_published.wait(2)
+            time.sleep(0.05)
+            latest = src.latest()
+            disconnect.set()
+            with pytest.raises(LiveFeedLost, match="stopped returning"):
+                src.latest()
+    finally:
+        second_read.set()
+        disconnect.set()
+    if capture.sys.platform == "darwin":
         factory.assert_called_once_with(2, cv2.CAP_AVFOUNDATION)
-        self.assertEqual(int(first.frame_bgr[0, 0, 0]), 1)
-        self.assertEqual(int(latest.frame_bgr[0, 0, 0]), 3)
-        self.assertGreater(latest.timestamp_ms, first.timestamp_ms)
-        self.assertTrue(video.released.is_set())
+    assert int(first.image[0, 0, 0]) == 1
+    assert int(latest.image[0, 0, 0]) == 3
+    assert src.dropped >= 1
+    assert latest.ts_ms > first.ts_ms
+    assert video.released.wait(2)
 
-    def test_blocked_read_times_out_before_or_after_first_frame(self):
-        for started in (False, True):
-            with self.subTest(started=started):
-                unblock = Event()
 
-                def images():
-                    if started:
-                        yield 1, 0
-                    unblock.wait(2)
-                    yield 2, 0
+@pytest.mark.parametrize("started", [False, True])
+def test_blocked_read_times_out_before_or_after_first_frame(started):
+    unblock = Event()
 
-                video = FakeVideo(images())
-                with patch.object(cv2, "VideoCapture", return_value=video):
-                    try:
-                        with capture.open_camera(1, stall_timeout_seconds=0.1) as frames:
-                            if started:
-                                next(frames)
-                            failure = capture.LiveFeedLost if started else capture.CaptureOpenError
-                            with self.assertRaisesRegex(failure, "timed out"):
-                                next(frames)
-                    finally:
-                        unblock.set()
-                    self.assertTrue(video.released.wait(2))
+    def images():
+        if started:
+            yield 1, 0
+        unblock.wait(2)
+        yield 2, 0
 
-    def test_device_open_failure(self):
-        video = FakeVideo(opened=False)
+    video = FakeVideo(images())
+    try:
         with patch.object(cv2, "VideoCapture", return_value=video):
-            with capture.open_camera(7) as frames:
-                with self.assertRaisesRegex(capture.CaptureOpenError, "camera 7"):
-                    next(frames)
-        self.assertTrue(video.released.is_set())
+            src = FrameSource(1, stall_timeout_seconds=0.1)
+            with src:
+                if not started:
+                    with pytest.raises(CaptureOpenError, match="timed out"):
+                        src.wait_ready()
+                else:
+                    src.wait_ready()
+                    src.start()
+                    with pytest.raises(LiveFeedLost, match="timed out"):
+                        src.latest()
+    finally:
+        unblock.set()
+    assert video.released.wait(2)
 
-    def test_startup_deadline_uses_monotonic_capture_clock(self):
-        with patch.object(capture, "monotonic", side_effect=[100.0, 105.0]):
-            camera = capture._LiveCamera(0, 5.0)
-            with self.assertRaisesRegex(capture.CaptureOpenError, "timed out"):
-                next(camera)
+
+def test_camera_open_failure():
+    video = FakeVideo(opened=False)
+    with patch.object(cv2, "VideoCapture", return_value=video):
+        src = FrameSource(7)
+        with src, pytest.raises(CaptureOpenError, match="camera 7"):
+            src.wait_ready()
+    assert video.released.wait(2)
+
+
+def test_warmup_time_before_start_does_not_count_as_stall():
+    def images():
+        yield 1, 0
+        while True:
+            time.sleep(0.01)
+            yield 2, 0
+
+    video = FakeVideo(images())
+    src, _ = camera(video, stall_timeout_seconds=0.1)
+    with src:
+        time.sleep(0.3)  # "model warmup" longer than the stall timeout
+        src.start()
+        assert src.latest() is not None

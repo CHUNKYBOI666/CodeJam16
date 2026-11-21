@@ -15,12 +15,11 @@ import sys
 import time
 from pathlib import Path
 
-import cv2
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import config  # noqa: E402
 from calibration import load_floor_polygon  # noqa: E402
+from capture import CaptureError, FrameSource  # noqa: E402
 from detector import PersonDownDetector, Posture  # noqa: E402
 from pose import REPO_ROOT, load_model, pick_device, predict, primary_keypoints, warm_up  # noqa: E402
 
@@ -28,33 +27,31 @@ VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 
 
 def eval_clip(path: Path, model, device: str, calibration: str) -> dict:
-    cap = cv2.VideoCapture(str(path))
-    if not cap.isOpened():
-        return {"clip": path.name, "error": "could not open"}
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    floor = load_floor_polygon(calibration, w, h)
-    warm_up(model, device, w, h, passes=1)
-    det = PersonDownDetector(floor_polygon=floor)
-    alerts, frames, unknown, infer_ms = [], 0, 0, 0.0
-    while True:
-        ok, img = cap.read()
-        if not ok:
-            break
-        ts_ms = frames * 1000.0 / fps
-        t0 = time.perf_counter()
-        xy, conf = primary_keypoints(predict(model, img, device))
-        infer_ms += (time.perf_counter() - t0) * 1000.0
-        status = det.update(ts_ms, xy, conf)
-        if status.reading.posture is Posture.UNKNOWN:
-            unknown += 1
-        if status.alert:
-            alerts.append(status.alert)
-        frames += 1
-    cap.release()
+    alerts, frames, unknown, infer_ms, last_ms = [], 0, 0, 0.0, 0.0
+    floor = None
+    try:
+        with FrameSource(path, realtime=False) as src:
+            src.wait_ready()
+            floor = load_floor_polygon(calibration, src.width, src.height)
+            warm_up(model, device, src.width, src.height, passes=1)
+            det = PersonDownDetector(floor_polygon=floor)
+            src.start()
+            while (frame := src.latest()) is not None:
+                t0 = time.perf_counter()
+                xy, conf = primary_keypoints(predict(model, frame.image, device))
+                infer_ms += (time.perf_counter() - t0) * 1000.0
+                status = det.update(frame.ts_ms, xy, conf)
+                if status.reading.posture is Posture.UNKNOWN:
+                    unknown += 1
+                if status.alert:
+                    alerts.append(status.alert)
+                frames += 1
+                last_ms = frame.ts_ms
+    except CaptureError as err:
+        return {"clip": path.name, "error": f"{type(err).__name__}: {err} (after {frames} frames)"}
     return {
         "clip": path.name,
-        "seconds": frames / fps,
+        "seconds": last_ms / 1000.0,
         "frames": frames,
         "unknown": unknown,
         "ms": infer_ms / max(frames, 1),

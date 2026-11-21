@@ -18,10 +18,15 @@ The full design is in `docs/designs/live-venue-welfare-checks.md`; this file ove
 - CUT: invite tokens/sessions (use a name picker + cookie), overdue badge, CI, deployment, exhaustive tests.
 - STRETCH (only if core works): one Gemini call per incident for a one-line description.
 
+## Layout and ownership
+- `cv/` = capture + detector (one owner). `capture.py` (frames + failures), `detector.py` (pure posture rule + state machine), `pose.py` (model), `calibration.py`, `run.py` (overlay), `eval_clips.py`, `capture_probe.py`. Tests: `tests/test_capture.py`, `test_detector.py`, `test_calibration.py`.
+- Staff web app = teammate: `src/codejam16/web/`, `src/codejam16/store.py`, staff workflow tests. Don't edit it from `cv/` work; the boundary is the `create_check(...)` call below.
+- There is no other capture module; `src/codejam16/capture.py` was folded into `cv/capture.py`.
+
 ## Stack
 - Python 3.12 (NOT 3.14 — torch/ultralytics wheels lag). Use `uv` or a venv.
 - `ultralytics` pose model: `yolo26n-pose.pt` (fall back to `yolo11n-pose.pt` if unavailable). `device="mps"` on Apple Silicon, else cpu.
-- OpenCV for capture: same code path for webcam index or video file.
+- OpenCV for capture via `cv/capture.py`: same code path for webcam index or video file. Cameras open with AVFoundation on macOS. Failures are typed: `CaptureOpenError`, `LiveFeedLost` (no frame for 5 s), `CaptureReadError` (bad decode/timestamps).
 - Flask + SQLite + plain HTML/JS for staff views. One process; detector runs in a background thread.
 
 ## Detector contract
@@ -30,7 +35,7 @@ The full design is in `docs/designs/live-venue-welfare-checks.md`; this file ove
 - State machine: UPRIGHT -> PENDING (accumulate down time) -> ALERTED (latched) -> rearm only after 2.0s continuous upright. UNKNOWN breaks pending timers but never clears ALERTED. Use frame timestamps, not frame counts.
 - On confirmation call `create_check(episode_id, signal="possible_person_down", zone, source, detected_at)`. Idempotent on episode_id.
 - Thresholds live in `config.py`.
-- Always process the latest frame only (drop stale frames).
+- Always process the latest frame only (drop stale frames). Timestamps: elapsed capture time for cameras, media time for files.
 
 ## Conventions
 - Keep detector logic pure (no cv2/IO) so it can be unit tested on fake keypoint sequences.

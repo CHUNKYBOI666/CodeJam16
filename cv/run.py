@@ -1,14 +1,15 @@
 """Live person-down detector with overlay: skeleton, torso angle, floor region, timers, FPS.
 
     python cv/run.py --source 0                     # webcam index
-    python cv/run.py --source clips/lie_down.mp4    # video file, paced at real time
-    python cv/run.py --source clips/lie_down.mp4 --no-show --save local/out.mp4
+    python cv/run.py --source clips/lying_down_twice.mp4    # video file, paced at real time
+    python cv/run.py --source clips/lying_down_twice.mp4 --no-show --save local/out.mp4
     python cv/run.py --source 0 --calibrate         # click the floor polygon on the first frame
 
-The capture thread keeps only the newest frame; inference always runs on that one and
-stale frames are dropped (counted on the overlay). Video files are paced at their own
-frame rate so dropping behaves like a live camera. Use --every-frame to process every
-frame of a file instead (deterministic, not real time).
+Capture (cv/capture.py) keeps only the newest frame; inference always runs on that one
+and stale frames are dropped (counted on the overlay). Video files are paced at their
+media time so dropping behaves like a live camera. Use --every-frame to process every
+frame of a file instead (deterministic, not real time). A camera that stops delivering
+frames for --stall-timeout seconds ends the run with exit code 2.
 """
 
 from __future__ import annotations
@@ -16,9 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import threading
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,100 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import config  # noqa: E402
 from calibration import load_floor_polygon, save_calibration  # noqa: E402
+from capture import CaptureError, FrameSource  # noqa: E402
 from detector import PersonDownDetector, Posture, State, Status  # noqa: E402
 from pose import REPO_ROOT, load_model, pick_device, predict, primary_keypoints, warm_up  # noqa: E402
-
-
-# ---------------------------------------------------------------- capture
-
-
-@dataclass
-class Frame:
-    image: np.ndarray
-    ts_ms: float  # media time for files, elapsed capture time for live
-    seq: int
-
-
-class LatestFrameReader:
-    """Background reader that holds only the most recent frame.
-
-    Opening reads one frame to learn the real frame size (used for warmup and
-    calibration); the reader thread only starts on start().
-    """
-
-    def __init__(self, source: int | str, realtime: bool = True):
-        self.cap = cv2.VideoCapture(source)
-        if not self.cap.isOpened():
-            raise SystemExit(f"Could not open source: {source!r}")
-        self.is_file = isinstance(source, str)
-        self.realtime = realtime or not self.is_file
-        fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.source_fps = fps if fps and fps > 1 else 30.0
-        ok, first = self.cap.read()
-        if not ok:
-            raise SystemExit(f"Source produced no frames: {source!r}")
-        self.first_frame = first
-        self.height, self.width = first.shape[:2]
-        if self.is_file:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        self.dropped = 0
-        self.eof = False
-        self._latest: Frame | None = None
-        self._consumed = True
-        self._cond = threading.Condition()
-        self._stop = False
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def start(self) -> "LatestFrameReader":
-        self._thread.start()
-        return self
-
-    def _run(self) -> None:
-        start = time.monotonic()
-        idx = 0
-        while not self._stop:
-            ok, image = self.cap.read()
-            if not ok:
-                break
-            if self.is_file:
-                ts_ms = idx * 1000.0 / self.source_fps
-                if self.realtime:
-                    delay = start + ts_ms / 1000.0 - time.monotonic()
-                    if delay > 0:
-                        time.sleep(delay)
-            else:
-                ts_ms = (time.monotonic() - start) * 1000.0
-            with self._cond:
-                if not self.realtime:
-                    # --every-frame: wait for the consumer instead of dropping.
-                    self._cond.wait_for(lambda: self._consumed or self._stop)
-                elif not self._consumed:
-                    self.dropped += 1
-                self._latest = Frame(image, ts_ms, idx)
-                self._consumed = False
-                self._cond.notify_all()
-            idx += 1
-        with self._cond:
-            self.eof = True
-            self._cond.notify_all()
-
-    def latest(self, timeout: float = 1.0) -> Frame | None:
-        """Block until an unseen frame is available; None at end of stream / timeout."""
-        with self._cond:
-            self._cond.wait_for(lambda: not self._consumed or self.eof, timeout=timeout)
-            if self._consumed:
-                return None
-            self._consumed = True
-            self._cond.notify_all()
-            return self._latest
-
-    def close(self) -> None:
-        with self._cond:
-            self._stop = True
-            self._cond.notify_all()
-        if self._thread.is_alive():
-            self._thread.join(timeout=2)
-        self.cap.release()
 
 
 # ---------------------------------------------------------------- calibration UI
@@ -316,13 +224,25 @@ def main() -> None:
     ap.add_argument("--weights", help="override pose weights (default: yolo26n-pose, fallback yolo11n-pose)")
     ap.add_argument("--device", help="mps / cuda / cpu (default: auto)")
     ap.add_argument("--every-frame", action="store_true", help="files only: process every frame, no dropping")
+    ap.add_argument("--constant-fps", type=float, help="files only: use index/fps timestamps instead of media time")
+    ap.add_argument("--stall-timeout", type=float, default=5.0, help="seconds without a camera frame = feed lost")
     ap.add_argument("--no-show", action="store_true", help="do not open a window")
     ap.add_argument("--save", help="write the annotated video to this path")
     ap.add_argument("--log-every", type=float, default=1.0, help="seconds between console stat lines (0 = off)")
     args = ap.parse_args()
 
     source = parse_source(args.source)
-    reader = LatestFrameReader(source, realtime=not args.every_frame)
+    try:
+        reader = FrameSource(
+            source,
+            realtime=not args.every_frame,
+            constant_fps=args.constant_fps,
+            stall_timeout_seconds=args.stall_timeout,
+        )
+        reader.wait_ready()
+    except (CaptureError, ValueError) as err:
+        raise SystemExit(f"[run] CAPTURE FAILED: {err}")
+    print(f"[run] source {args.source} via {reader.backend}, {reader.width}x{reader.height}")
 
     if args.calibrate:
         run_calibration(reader.first_frame, Path(args.calibration), str(args.source))
@@ -354,14 +274,20 @@ def main() -> None:
     processed = 0
     alerts = 0
     t_start = time.monotonic()
+    capture_error = None
 
     try:
         while True:
-            frame = reader.latest()
-            if frame is None:
-                if reader.eof:
-                    break
-                continue
+            try:
+                frame = reader.latest()
+            except CaptureError as err:
+                # Camera offline / clip unreadable. A latched episode stays latched; the
+                # caller (staff app integration) decides whether to fall back to replay.
+                capture_error = err
+                print(f"[run] CAPTURE FAILED ({type(err).__name__}): {err}")
+                break
+            if frame is None:  # end of file
+                break
 
             t0 = time.perf_counter()
             result = predict(model, frame.image, device)
@@ -431,6 +357,8 @@ def main() -> None:
     )
     if args.save:
         print(f"[run] saved {args.save}")
+    if capture_error is not None:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
