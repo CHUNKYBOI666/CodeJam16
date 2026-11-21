@@ -11,6 +11,7 @@ first frame the detector classified as DOWN in that episode to the confirming fr
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import sys
 import time
 from pathlib import Path
@@ -21,28 +22,29 @@ import config  # noqa: E402
 from calibration import load_floor_polygon  # noqa: E402
 from capture import CaptureError, FrameSource  # noqa: E402
 from detector import PersonDownDetector, Posture  # noqa: E402
-from pose import REPO_ROOT, load_model, pick_device, predict, primary_keypoints, warm_up  # noqa: E402
+from pose import REPO_ROOT, load_model, pick_device, people_from_result, predict, warm_up  # noqa: E402
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 
 
 def eval_clip(path: Path, model, device: str, calibration: str) -> dict:
-    alerts, frames, unknown, infer_ms, last_ms = [], 0, 0, 0.0, 0.0
+    alerts, frames, infer_ms, last_ms = [], 0, 0.0, 0.0
+    reasons: Counter[str] = Counter()
     floor = None
     try:
         with FrameSource(path, realtime=False) as src:
             src.wait_ready()
             floor = load_floor_polygon(calibration, src.width, src.height)
             warm_up(model, device, src.width, src.height, passes=1)
-            det = PersonDownDetector(floor_polygon=floor)
+            det = PersonDownDetector(floor_polygon=floor, frame_size=(src.width, src.height))
             src.start()
             while (frame := src.latest()) is not None:
                 t0 = time.perf_counter()
-                xy, conf = primary_keypoints(predict(model, frame.image, device))
+                people = people_from_result(predict(model, frame.image, device))
                 infer_ms += (time.perf_counter() - t0) * 1000.0
-                status = det.update(frame.ts_ms, xy, conf)
+                status = det.update_people(frame.ts_ms, people)
                 if status.reading.posture is Posture.UNKNOWN:
-                    unknown += 1
+                    reasons[status.reading.reason.value] += 1
                 if status.alert:
                     alerts.append(status.alert)
                 frames += 1
@@ -53,7 +55,8 @@ def eval_clip(path: Path, model, device: str, calibration: str) -> dict:
         "clip": path.name,
         "seconds": last_ms / 1000.0,
         "frames": frames,
-        "unknown": unknown,
+        "unknown": sum(reasons.values()),
+        "reasons": reasons,
         "ms": infer_ms / max(frames, 1),
         "alerts": alerts,
         "floor": floor is not None,
@@ -96,6 +99,13 @@ def main() -> None:
         ) or "-"
         unk = 100.0 * r["unknown"] / max(r["frames"], 1)
         print(f"{r['clip']:28s} {r['seconds']:6.1f} {unk:5.0f} {r['ms']:5.1f} {len(r['alerts']):6d}  {detail}")
+
+    print("\nunknown frames by reason")
+    for r in rows:
+        if "error" in r or not r["reasons"]:
+            continue
+        parts = ", ".join(f"{k}={v}" for k, v in r["reasons"].most_common())
+        print(f"  {r['clip']:28s} {parts}")
 
 
 if __name__ == "__main__":

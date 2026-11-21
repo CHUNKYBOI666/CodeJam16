@@ -32,8 +32,11 @@ The full design is in `docs/designs/live-venue-welfare-checks.md`; this file ove
 ## Detector contract
 - COCO keypoints: shoulders 5,6; hips 11,12. Require conf >= 0.5 on all four, else frame = UNKNOWN.
 - Down = torso (shoulder-mid -> hip-mid) within ~30 deg of horizontal AND midpoints in calibrated floor region.
+- Also required for down: keypoint bounding box wider than tall.
+- Upright (counts toward rearm) = torso >= 60 deg, shoulders above hips, hips raised above own ankles (knees if ankles hidden). Sitting up on the floor does not rearm.
+- Several people: anyone down -> frame is DOWN; else 2+ confident people -> UNKNOWN(multiple_people). UNKNOWN always carries a reason.
 - State machine: UPRIGHT -> PENDING (accumulate down time) -> ALERTED (latched) -> rearm only after 2.0s continuous upright. UNKNOWN breaks pending timers but never clears ALERTED. Use frame timestamps, not frame counts.
-- On confirmation call `create_check(episode_id, signal="possible_person_down", zone, source, detected_at)`. Idempotent on episode_id.
+- On confirmation call `create_check(...)` with the fields of `fixtures/person-down.json`: episode_id, signal="possible_person_down", camera_id, zone_id, detected_at (UTC, `Z`), source. Idempotent on episode_id. Until wired in, `cv/run.py` prints these events to stdout as JSON lines (logs on stderr).
 - Thresholds live in `config.py`.
 - Always process the latest frame only (drop stale frames). Timestamps: elapsed capture time for cameras, media time for files.
 

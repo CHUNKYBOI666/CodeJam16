@@ -22,9 +22,27 @@ KEYPOINT_MIN_CONF = 0.5  # all four torso points must clear this, else UNKNOWN
 #   keypoint bounding box wider than tall (width / height > BBOX_MIN_ASPECT).
 DOWN_MAX_TORSO_DEG = 30.0
 BBOX_MIN_ASPECT = 1.0
-# Rearm counts only clearly upright frames (torso at least this steep). Frames that are
-# neither down nor upright (e.g. half sitting up on the floor) reset the rearm timer.
+# Rearm counts only clearly upright frames. Upright needs ALL of:
+#   torso at least UPRIGHT_MIN_TORSO_DEG steep, shoulders above hips (not head-down),
+#   and hips raised above the person's own feet: vertical hip->ankle gap at least
+#   UPRIGHT_MIN_HIP_ANKLE_RATIO x torso length (hip->knee gap and its ratio if ankles
+#   aren't visible; no leg check if neither is visible). Sitting up on the floor fails
+#   the leg check, so it does not rearm. Frames that are neither down nor upright reset
+#   the rearm timer.
 UPRIGHT_MIN_TORSO_DEG = 60.0
+UPRIGHT_MIN_HIP_ANKLE_RATIO = 0.6
+UPRIGHT_MIN_HIP_KNEE_RATIO = 0.3
+
+# More than one person: if anyone is down, the frame is DOWN (that person is tracked).
+# Otherwise two or more people with box confidence >= this make the frame UNKNOWN
+# (multiple_people), so a bystander or responder can't rearm or reset the detector.
+# Weaker detections (e.g. a reflection in a TV) don't count toward "multiple".
+OTHER_PERSON_MIN_CONF = 0.5
+
+# Alert event (fields match fixtures/person-down.json).
+ALERT_SIGNAL = "possible_person_down"  # CLAUDE.md; the synthetic fixture says "person_down"
+CAMERA_ID = "demo-camera"
+ZONE_ID = "demo-area"
 
 # State machine timings, in seconds of frame timestamps (not frame counts).
 CONFIRM_DOWN_SECONDS = 2.0

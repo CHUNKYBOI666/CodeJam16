@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 import config
+from detector import Person
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -59,12 +60,14 @@ def warm_up(model, device: str, width: int, height: int, passes: int = config.WA
         predict(model, dummy, device)
 
 
-def primary_keypoints(result):
-    """(xy, conf) numpy arrays for the most confident person, or (None, None)."""
+def people_from_result(result) -> list[Person]:
+    """Every detected person's keypoints and box score (empty list if nobody)."""
     if result.keypoints is None or result.boxes is None or len(result.boxes) == 0:
-        return None, None
-    i = int(result.boxes.conf.argmax().item())
+        return []
     kp = result.keypoints
-    xy = kp.xy[i].cpu().numpy()
-    conf = kp.conf[i].cpu().numpy() if kp.conf is not None else None
-    return xy, conf
+    if kp.conf is None:
+        return []
+    xy = kp.xy.cpu().numpy()
+    conf = kp.conf.cpu().numpy()
+    scores = result.boxes.conf.cpu().numpy()
+    return [Person(xy[i], conf[i], float(scores[i])) for i in range(len(scores))]

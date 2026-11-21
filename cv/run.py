@@ -5,11 +5,17 @@
     python cv/run.py --source clips/lying_down_twice.mp4 --no-show --save local/out.mp4
     python cv/run.py --source 0 --calibrate         # click the floor polygon on the first frame
 
+Output: alerts go to stdout as one JSON object per line (fields as in
+fixtures/person-down.json); all logs, including library output, go to stderr.
+
+    python cv/run.py --source 0 --no-show > local/alerts.jsonl
+
 Capture (cv/capture.py) keeps only the newest frame; inference always runs on that one
 and stale frames are dropped (counted on the overlay). Video files are paced at their
 media time so dropping behaves like a live camera. Use --every-frame to process every
-frame of a file instead (deterministic, not real time). A camera that stops delivering
-frames for --stall-timeout seconds ends the run with exit code 2.
+frame of a file instead (deterministic, not real time). Exit codes: 2 if the camera
+stops delivering frames for --stall-timeout seconds or the clip can't be decoded,
+3 if whatever reads stdout goes away.
 """
 
 from __future__ import annotations
@@ -29,8 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
 from calibration import load_floor_polygon, save_calibration  # noqa: E402
 from capture import CaptureError, FrameSource  # noqa: E402
-from detector import PersonDownDetector, Posture, State, Status  # noqa: E402
-from pose import REPO_ROOT, load_model, pick_device, predict, primary_keypoints, warm_up  # noqa: E402
+from detector import PersonDownDetector, Posture, State, Status, alert_event  # noqa: E402
+from pose import REPO_ROOT, load_model, pick_device, people_from_result, predict, warm_up  # noqa: E402
 
 
 # ---------------------------------------------------------------- calibration UI
@@ -178,7 +184,7 @@ def annotate(img, status: Status, floor, model_name, device, fps, ms, ts_ms, dro
         aspect = "inf" if r.bbox_aspect == float("inf") else f"{r.bbox_aspect or 0:.2f}"
         geo_line = (f"box w/h {aspect}   on floor {'yes' if r.in_floor else 'no'}", GREY)
     else:
-        torso_line = ("torso UNKNOWN (no person / low conf)", GREY)
+        torso_line = (f"torso UNKNOWN ({r.reason.value if r.reason else '-'})", GREY)
         geo_line = ("box w/h -   on floor -", GREY)
     state_color = {State.UPRIGHT: GREEN, State.PENDING: AMBER, State.ALERTED: RED}[status.state]
     bottom = draw_panel(
@@ -188,8 +194,8 @@ def annotate(img, status: Status, floor, model_name, device, fps, ms, ts_ms, dro
             (f"FPS {fps:5.1f}   {ms:5.1f} ms/frame", WHITE),
             torso_line,
             geo_line,
-            (f"state {status.state.value}  ({r.posture.value})", state_color),
-            (f"t={ts_ms / 1000:6.2f}s  dropped {dropped}  cloud calls 0", GREY),
+            (f"state {status.state.value}  ({r.reason.value if r.reason else r.posture.value})", state_color),
+            (f"t={ts_ms / 1000:6.2f}s  people {r.people}  dropped {dropped}  cloud calls 0", GREY),
         ],
     )
     confirm = config.CONFIRM_DOWN_SECONDS
@@ -220,7 +226,8 @@ def main() -> None:
     ap.add_argument("--source", required=True, help="webcam index (e.g. 0) or path to a video file")
     ap.add_argument("--calibrate", action="store_true", help="click the floor polygon on the first frame and exit")
     ap.add_argument("--calibration", default=str(REPO_ROOT / config.CALIBRATION_PATH), help="calibration json path")
-    ap.add_argument("--zone", default="demo-area", help="zone id reported with alerts")
+    ap.add_argument("--camera-id", default=config.CAMERA_ID, help="camera id reported with alerts")
+    ap.add_argument("--zone-id", "--zone", dest="zone_id", default=config.ZONE_ID, help="zone id reported with alerts")
     ap.add_argument("--weights", help="override pose weights (default: yolo26n-pose, fallback yolo11n-pose)")
     ap.add_argument("--device", help="mps / cuda / cpu (default: auto)")
     ap.add_argument("--every-frame", action="store_true", help="files only: process every frame, no dropping")
@@ -230,6 +237,11 @@ def main() -> None:
     ap.add_argument("--save", help="write the annotated video to this path")
     ap.add_argument("--log-every", type=float, default=1.0, help="seconds between console stat lines (0 = off)")
     args = ap.parse_args()
+
+    # stdout carries alerts only, one JSON object per line. Everything else, including
+    # library output (ultralytics is imported later), goes to stderr.
+    alert_out = sys.stdout
+    sys.stdout = sys.stderr
 
     source = parse_source(args.source)
     try:
@@ -262,7 +274,7 @@ def main() -> None:
     warm_up(model, device, reader.width, reader.height)
     print(f"[run] warmed up at {reader.width}x{reader.height} in {time.perf_counter() - t_warm:.1f}s")
 
-    detector = PersonDownDetector(floor_polygon=floor)
+    detector = PersonDownDetector(floor_polygon=floor, frame_size=(reader.width, reader.height))
     source_kind = "replay" if reader.is_file else "live"
     reader.start()  # capture (and file pacing) begins only after the model is warm
 
@@ -275,6 +287,7 @@ def main() -> None:
     alerts = 0
     t_start = time.monotonic()
     capture_error = None
+    alert_pipe_closed = False
 
     try:
         while True:
@@ -292,8 +305,7 @@ def main() -> None:
             t0 = time.perf_counter()
             result = predict(model, frame.image, device)
             infer_ms = (time.perf_counter() - t0) * 1000.0
-            xy, conf = primary_keypoints(result)
-            status = detector.update(frame.ts_ms, xy, conf)
+            status = detector.update_people(frame.ts_ms, people_from_result(result))
 
             now = time.monotonic()
             if last_wall is not None:
@@ -306,15 +318,23 @@ def main() -> None:
             if status.alert:
                 alerts += 1
                 a = status.alert
-                event = {
-                    "episode_id": a.episode_id,
-                    "signal": a.signal,
-                    "zone": args.zone,
-                    "source": source_kind,
-                    "detected_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                }
-                print(f"[ALERT] t={a.detected_at_ms / 1000:.2f}s (down since {a.down_started_ms / 1000:.2f}s, "
-                      f"+{(a.detected_at_ms - a.down_started_ms) / 1000:.2f}s) {json.dumps(event)}")
+                event = alert_event(
+                    a,
+                    camera_id=args.camera_id,
+                    zone_id=args.zone_id,
+                    source=source_kind,
+                    detected_at=datetime.now(timezone.utc),
+                )
+                print(f"[ALERT] {a.episode_id} t={a.detected_at_ms / 1000:.2f}s "
+                      f"(down since {a.down_started_ms / 1000:.2f}s, "
+                      f"+{(a.detected_at_ms - a.down_started_ms) / 1000:.2f}s)")
+                try:
+                    alert_out.write(json.dumps(event) + "\n")
+                    alert_out.flush()
+                except BrokenPipeError:
+                    alert_pipe_closed = True
+                    print("[run] alert consumer closed stdout; stopping")
+                    break
 
             img = result.plot(boxes=False, labels=False, conf=False)  # skeleton(s)
             annotate(img, status, floor, model_name, device, fps_ema or 0.0, ms_ema, frame.ts_ms, reader.dropped)
@@ -336,9 +356,11 @@ def main() -> None:
                 last_log = now
                 r = status.reading
                 ang = f"{r.torso.angle_deg:5.1f}" if r.torso else "  UNK"
+                why = f" ({r.reason.value})" if r.reason else ""
                 print(
                     f"[run] t={frame.ts_ms / 1000:6.2f}s fps={fps_ema or 0:5.1f} ms={infer_ms:5.1f} "
-                    f"torso={ang} {status.state.value:8s} down={status.down_seconds:4.1f}s dropped={reader.dropped}"
+                    f"torso={ang} {status.state.value:8s}{why} down={status.down_seconds:4.1f}s "
+                    f"people={r.people} dropped={reader.dropped}"
                 )
     except KeyboardInterrupt:
         pass
@@ -359,6 +381,8 @@ def main() -> None:
         print(f"[run] saved {args.save}")
     if capture_error is not None:
         raise SystemExit(2)
+    if alert_pipe_closed:
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":

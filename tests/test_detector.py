@@ -287,3 +287,175 @@ def test_config_thresholds_are_respected():
     cfg = DetectorConfig(confirm_down_seconds=0.5)
     c = Clock(make(cfg=cfg)).hold(LYING, 0.6)
     assert len(c.alerts) == 1
+
+
+# ---------------------------------------------------------------- multiple people (ported idea 1)
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from detector import Person, UnknownReason, alert_event, classify_people  # noqa: E402
+
+
+def P(kp, score=0.9):
+    return Person(*kp, score=score)
+
+
+WALKER = person(90, legs="down", hip=(800, 600))
+
+
+def feed_people(det, frames_people, seconds, clock):
+    """Like Clock.hold but with a list of people per frame."""
+    n = int(round(seconds * 1000.0 / clock.dt_ms))
+    for _ in range(n):
+        clock.last = det.update_people(clock.t_ms, frames_people)
+        if clock.last.alert:
+            clock.alerts.append(clock.last.alert)
+        clock.t_ms += clock.dt_ms
+    return clock
+
+
+def test_down_person_wins_over_more_confident_walker():
+    r = classify_people([P(WALKER, 0.95), P(LYING, 0.6)], FLOOR)
+    assert r.posture is Posture.DOWN and r.people == 2
+
+
+def test_lying_person_with_walker_alerts_once():
+    det = make()
+    c = Clock(det)
+    feed_people(det, [P(LYING, 0.6), P(WALKER, 0.95)], 3, c)
+    assert len(c.alerts) == 1
+
+
+def test_two_confident_people_nobody_down_is_unknown_multiple_people():
+    r = classify_people([P(STANDING), P(WALKER)], FLOOR)
+    assert r.posture is Posture.UNKNOWN
+    assert r.reason is UnknownReason.MULTIPLE_PEOPLE
+    assert r.torso is not None  # still shown on the overlay
+
+
+def test_weak_second_detection_does_not_count_as_multiple():
+    # e.g. a reflection in a TV screen
+    r = classify_people([P(STANDING, 0.9), P(WALKER, 0.3)], FLOOR)
+    assert r.posture is Posture.UPRIGHT
+
+
+def test_responder_standing_next_to_downed_person_cannot_rearm():
+    det = make()
+    c = Clock(det)
+    feed_people(det, [P(LYING)], 3, c)
+    # Victim gets up but a responder is with them: two confident people -> UNKNOWN.
+    feed_people(det, [P(STANDING), P(WALKER)], 5, c)
+    assert c.last.state is State.ALERTED
+    feed_people(det, [P(LYING)], 3, c)
+    assert len(c.alerts) == 1
+
+
+def test_no_people_is_unknown_no_person():
+    assert classify_people([], FLOOR).reason is UnknownReason.NO_PERSON
+    assert classify_people(None, FLOOR).reason is UnknownReason.NO_PERSON
+
+
+# ---------------------------------------------------------------- unknown reasons (idea 2)
+
+
+def test_unknown_reasons():
+    assert classify_posture(None, None, FLOOR).reason is UnknownReason.NO_PERSON
+    assert classify_posture(*person(0, torso_conf=0.4), FLOOR).reason is UnknownReason.WEAK_TORSO
+    xy, conf = person(0)
+    off = [(x + 2000, y) for x, y in xy]
+    assert classify_posture(off, conf, None, frame_size=(1000, 1000)).reason is UnknownReason.TORSO_OFF_FRAME
+    same = [(500.0, 800.0)] * 17
+    assert classify_posture(same, conf, FLOOR).reason is UnknownReason.DEGENERATE_TORSO
+
+
+def test_known_postures_have_no_reason():
+    assert classify_posture(*LYING, FLOOR).reason is None
+    assert classify_posture(*STANDING, FLOOR).reason is None
+
+
+def test_status_exposes_reason():
+    s = make().update(0.0, *UNKNOWN)
+    assert s.reading.reason is UnknownReason.NO_PERSON
+
+
+# ---------------------------------------------------------------- stricter upright (idea 3)
+
+
+def test_sitting_up_on_floor_is_not_upright_and_does_not_rearm():
+    sit_up = person(85, legs="forward")  # torso vertical, hips at ankle height
+    assert classify_posture(*sit_up, FLOOR).posture is Posture.OTHER
+    c = Clock(make()).hold(LYING, 3).hold(sit_up, 5).hold(LYING, 3)
+    assert len(c.alerts) == 1
+    assert c.last.episode_id is not None
+
+
+def test_head_down_is_not_upright():
+    xy, conf = STANDING
+    flipped = [(x, 1200 - y) for x, y in xy]  # mirror vertically: shoulders below hips
+    conf = list(conf)
+    for i in (13, 14, 15, 16):  # hide legs so only the head-down check can reject it
+        conf[i] = 0.1
+    r = classify_posture(flipped, conf, None)
+    assert r.torso.angle_deg >= 60
+    assert r.posture is Posture.OTHER
+
+
+def test_knees_used_when_ankles_hidden():
+    xy, conf = STANDING
+    conf = list(conf)
+    conf[15] = conf[16] = 0.1
+    assert classify_posture(xy, conf, FLOOR).posture is Posture.UPRIGHT
+    sit_xy, sit_conf = person(85, legs="forward")
+    sit_conf = list(sit_conf)
+    sit_conf[15] = sit_conf[16] = 0.1
+    assert classify_posture(sit_xy, sit_conf, FLOOR).posture is Posture.OTHER
+
+
+def test_legs_hidden_falls_back_to_torso_checks():
+    xy, conf = STANDING
+    conf = list(conf)
+    for i in (13, 14, 15, 16):
+        conf[i] = 0.1
+    assert classify_posture(xy, conf, FLOOR).posture is Posture.UPRIGHT
+
+
+def test_standing_still_rearms():
+    c = Clock(make()).hold(LYING, 3).hold(STANDING, 2.5).hold(LYING, 3)
+    assert len(c.alerts) == 2
+
+
+# ---------------------------------------------------------------- alert event (idea 4)
+
+
+def test_alert_event_matches_fixture_fields():
+    fixture = json.loads((Path(__file__).parent.parent / "fixtures" / "person-down.json").read_text())
+    c = Clock(make()).hold(LYING, 3)
+    ev = alert_event(
+        c.alerts[0],
+        camera_id="demo-camera",
+        zone_id="demo-area",
+        source="replay",
+        detected_at=datetime(2026, 1, 1, 5, 0, 0, 123000, tzinfo=timezone(timedelta(hours=5))),
+    )
+    assert list(ev) == list(fixture)
+    assert ev["detected_at"] == "2026-01-01T00:00:00.123Z"
+    assert ev["episode_id"] == "ep1"
+    assert ev["signal"] == "possible_person_down"
+    assert {k: ev[k] for k in ("camera_id", "zone_id", "source")} == {
+        k: fixture[k] for k in ("camera_id", "zone_id", "source")
+    }
+
+
+def test_alert_event_rejects_naive_time():
+    c = Clock(make()).hold(LYING, 3)
+    with pytest.raises(ValueError):
+        alert_event(c.alerts[0], camera_id="c", zone_id="z", source="live", detected_at=datetime(2026, 1, 1))
+
+
+def test_default_episode_ids_are_unique_uuids():
+    det = PersonDownDetector(floor_polygon=FLOOR)
+    c = Clock(det).hold(LYING, 3).hold(STANDING, 2.5).hold(LYING, 3)
+    ids = [a.episode_id for a in c.alerts]
+    assert len(set(ids)) == 2 and all(len(i) == 36 for i in ids)

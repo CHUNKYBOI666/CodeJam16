@@ -25,6 +25,13 @@ Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dro
 `--constant-fps 30` (files whose decoder reports no usable media timestamps), `--stall-timeout 5`.
 Weights download to `local/weights/` on first run. `clips/` and `local/` are git-ignored.
 
+Alerts are printed to stdout as one JSON object per line, with the fields of
+`fixtures/person-down.json`; logs go to stderr. Set the ids with `--camera-id` and `--zone-id`:
+
+```bash
+.venv/bin/python cv/run.py --source 0 --zone-id east-bar > local/alerts.jsonl
+```
+
 ## Capture probe on macOS
 
 Checks that a camera or clip delivers changing frames, without running the pose model:
