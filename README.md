@@ -58,5 +58,18 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 .venv/bin/python cv/run.py --source clips/lie_down.mp4   # recording (paced at real time)
 ```
 
+Calibrate the floor region once per camera placement (click corners on the first frame, Enter to save to `local/calibration.json`):
+
+```bash
+.venv/bin/python cv/run.py --source clips/lie_down.mp4 --calibrate
+```
+
 Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dropping), `--device cpu`.
 Weights download to `local/weights/` on first run. `clips/` and `local/` are git-ignored.
+
+## Tests and clip evaluation
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/python cv/eval_clips.py    # every clip in clips/: alerts and down->alert time
+```
