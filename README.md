@@ -6,6 +6,8 @@ See the [three-person implementation handoff](docs/implementation-handoff.md) fo
 
 [Phone responder preview](docs/screenshots/responder.png) · [Supervisor map preview](docs/screenshots/supervisor.png)
 
+The responder link opens an iPhone-style alert inbox. Each card shows the camera zone, nearby landmark, and a pin on the venue floor plan. New checks appear as tappable notifications while the inbox is open. On a laptop, the supervisor’s response board shows who is on the way, who has arrived, and which checks still need a responder.
+
 The local staff app provides a responder queue and supervisor floor view backed by
 one SQLite incident store. On first launch it seeds two clearly labeled rehearsal
 checks. The camera feed currently reports **Rehearsal mode**; the detector is not

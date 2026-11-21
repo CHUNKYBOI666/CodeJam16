@@ -8,6 +8,25 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='staff.css') }}">
 </head>
 <body>
+  <svg aria-hidden="true" width="0" height="0" style="position:absolute"><defs>
+                <defs><pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1" fill="#dce4dd"/></pattern><pattern id="bar-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#f5f3ec"/><path d="M0 0v8" stroke="#e8e4d8" stroke-width="2"/></pattern></defs><g id="venue-geometry">
+                <rect x="21" y="25" width="718" height="382" rx="25" fill="#fafbf8" stroke="#d6ded7" stroke-width="2"/>
+                <path d="M43 46h380v333H43z" fill="url(#dots)" stroke="#d9e1d9" stroke-width="1.5"/>
+                <path d="M430 46h285v145H430z" fill="#f0f3ef" stroke="#d9e1d9" stroke-width="1.5"/>
+                <path d="M430 197h285v182H430z" fill="#f6f7f3" stroke="#d9e1d9" stroke-width="1.5"/>
+                <path d="M56 58h190v73H56z" fill="url(#bar-hatch)" stroke="#cdd6ce" stroke-width="1.5"/>
+                <path d="M72 70h158v35H72z" fill="#e9e3d4" stroke="#d3cbbb"/><path d="M72 112h158" stroke="#c9c1af" stroke-width="2"/>
+                <path d="M284 59h112v57H284z" fill="#ecf1ea" stroke="#d5dfd5"/><path d="M296 72h89v31" fill="none" stroke="#d8e1d6" stroke-dasharray="4 4"/>
+                <path d="M254 143h165" stroke="#d6ded7" stroke-width="1.5" stroke-dasharray="6 6"/>
+                <rect x="449" y="62" width="247" height="112" rx="8" fill="#fafbf8" stroke="#dce3dc"/>
+                <circle cx="487" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="562" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="637" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/>
+                <circle cx="487" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="562" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="637" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/>
+                <path d="M449 218h247v133H449z" fill="#eef3ed" stroke="#dce3dc"/><path d="M467 236h210v97H467z" fill="none" stroke="#d0dbd1" stroke-dasharray="4 5"/>
+                <path d="M50 324h180v36H50z" fill="#e8efea" stroke="#cfdad0"/><path d="M62 332h155" stroke="#ccd7cd" stroke-width="2"/><path d="M62 342h155" stroke="#ccd7cd" stroke-width="2"/><path d="M62 352h155" stroke="#ccd7cd" stroke-width="2"/>
+                <path d="M416 45v335" stroke="#fafbf8" stroke-width="12"/><path d="M416 45v335" stroke="#d4ded6" stroke-width="1.5" stroke-dasharray="5 7"/>
+                <text x="76" y="164" class="map-room-label">EAST BAR</text><text x="304" y="139" class="map-room-label">LOUNGE</text><text x="523" y="187" class="map-room-label">NORTH TABLES</text><text x="521" y="365" class="map-room-label">MAIN FLOOR</text><text x="75" y="387" class="map-small-label">SIDE STAIRS</text>
+</g>
+  </defs></svg>
   <div class="app-frame" id="app" data-role="{{ viewer.role }}" data-view="{{ initial_view }}">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Groundline home">
@@ -41,6 +60,15 @@
     </aside>
 
     <main class="main-area">
+      {% if viewer.role == 'responder' %}
+      <header class="phone-header">
+        <div class="phone-island" aria-hidden="true"></div>
+        <div class="phone-brand"><a class="brand" href="/"><span class="brand-mark"><span></span><span></span><span></span></span>groundline</a><form method="post" action="/logout"><button title="Sign out" aria-label="Sign out as {{ viewer.name }}">{{ viewer.name }}</button></form></div>
+        <span class="phone-venue">Mercury Hall · Field response</span>
+        <h1>Alert inbox</h1>
+        <div class="phone-status"><span id="phone-count">Loading checks…</span><span id="phone-sync">Connecting</span></div>
+      </header>
+      {% endif %}
       <header class="topbar">
         <div class="breadcrumbs"><span>Mercury Hall</span><i>/</i><strong id="breadcrumb-current">Welfare checks</strong></div>
         <div class="topbar-right"><div class="live-pill" id="sync-indicator"><span></span><b>Syncing</b></div><div class="topbar-divider"></div><span class="shift-label">SATURDAY SHIFT</span></div>
@@ -81,22 +109,7 @@
           <section class="map-card panel"><div class="panel-heading"><div><h2>Venue map <span class="map-live-label"><span class="tiny-led"></span>LIVE</span></h2><p>Camera 01 · fixed east-facing position</p></div></div>
             <div class="venue-map-wrap"><div class="map-label map-east">EAST WING</div><div class="map-label map-west">MAIN HALL</div>
               <svg class="venue-map" viewBox="0 0 760 440" role="img" aria-label="Venue floor plan showing the East bar, stairs and main floor">
-                <defs><pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1" fill="#dce4dd"/></pattern><pattern id="bar-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#f5f3ec"/><path d="M0 0v8" stroke="#e8e4d8" stroke-width="2"/></pattern></defs>
-                <rect x="21" y="25" width="718" height="382" rx="25" fill="#fafbf8" stroke="#d6ded7" stroke-width="2"/>
-                <path d="M43 46h380v333H43z" fill="url(#dots)" stroke="#d9e1d9" stroke-width="1.5"/>
-                <path d="M430 46h285v145H430z" fill="#f0f3ef" stroke="#d9e1d9" stroke-width="1.5"/>
-                <path d="M430 197h285v182H430z" fill="#f6f7f3" stroke="#d9e1d9" stroke-width="1.5"/>
-                <path d="M56 58h190v73H56z" fill="url(#bar-hatch)" stroke="#cdd6ce" stroke-width="1.5"/>
-                <path d="M72 70h158v35H72z" fill="#e9e3d4" stroke="#d3cbbb"/><path d="M72 112h158" stroke="#c9c1af" stroke-width="2"/>
-                <path d="M284 59h112v57H284z" fill="#ecf1ea" stroke="#d5dfd5"/><path d="M296 72h89v31" fill="none" stroke="#d8e1d6" stroke-dasharray="4 4"/>
-                <path d="M254 143h165" stroke="#d6ded7" stroke-width="1.5" stroke-dasharray="6 6"/>
-                <rect x="449" y="62" width="247" height="112" rx="8" fill="#fafbf8" stroke="#dce3dc"/>
-                <circle cx="487" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="562" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="637" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/>
-                <circle cx="487" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="562" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="637" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/>
-                <path d="M449 218h247v133H449z" fill="#eef3ed" stroke="#dce3dc"/><path d="M467 236h210v97H467z" fill="none" stroke="#d0dbd1" stroke-dasharray="4 5"/>
-                <path d="M50 324h180v36H50z" fill="#e8efea" stroke="#cfdad0"/><path d="M62 332h155" stroke="#ccd7cd" stroke-width="2"/><path d="M62 342h155" stroke="#ccd7cd" stroke-width="2"/><path d="M62 352h155" stroke="#ccd7cd" stroke-width="2"/>
-                <path d="M416 45v335" stroke="#fafbf8" stroke-width="12"/><path d="M416 45v335" stroke="#d4ded6" stroke-width="1.5" stroke-dasharray="5 7"/>
-                <text x="76" y="164" class="map-room-label">EAST BAR</text><text x="304" y="139" class="map-room-label">LOUNGE</text><text x="523" y="187" class="map-room-label">NORTH TABLES</text><text x="521" y="365" class="map-room-label">MAIN FLOOR</text><text x="75" y="387" class="map-small-label">SIDE STAIRS</text>
+                <use href="#venue-geometry"/>
                 <g class="map-pin-group" data-zone="east-bar" tabindex="0" role="button" aria-label="East bar checks"><circle class="pin-pulse" cx="241" cy="118" r="29"/><circle class="pin-shadow" cx="241" cy="118" r="18"/><circle class="pin-dot" cx="241" cy="118" r="13"/><text class="pin-count" id="pin-east-count" x="241" y="122">0</text></g>
                 <g class="map-pin-group" data-zone="main-floor" tabindex="0" role="button" aria-label="Main floor checks"><circle class="pin-pulse" cx="592" cy="274" r="29"/><circle class="pin-shadow" cx="592" cy="274" r="18"/><circle class="pin-dot" cx="592" cy="274" r="13"/><text class="pin-count" id="pin-main-count" x="592" y="278">0</text></g>
                 <g class="camera-marker" transform="translate(339 45)"><circle r="12"/><path d="M-5-3h6l2-2h4v10h-12z"/><circle cx="1" cy="0" r="2"/></g>
@@ -104,7 +117,7 @@
               <div class="map-legend"><span><i class="legend-dot legend-active"></i>Active check</span><span><i class="legend-dot legend-overdue"></i>Needs attention</span><span><i class="legend-camera"></i>Camera 01</span></div>
             </div>
           </section>
-          <aside class="map-side panel"><div class="panel-heading"><div><h2>Active checks <span class="count-badge" id="map-active-count">0</span></h2><p>Tap a check to view the response.</p></div></div><div class="map-check-list" id="map-check-list"><div class="loading-state"><span class="loader"></span>Loading checks…</div></div><div class="feed-card"><div class="feed-card-top"><span class="feed-camera-icon">◉</span><span class="feed-status-tag" id="map-feed-status">CONNECTING</span></div><strong>Camera 01 · East bar</strong><span id="map-feed-detail">Checking venue signal</span><div class="feed-progress"><i id="feed-progress-bar"></i></div><small>FIXED CAMERA <span>·</span> REHEARSAL SETUP</small></div></aside>
+          <aside class="map-side panel"><div class="panel-heading"><div><h2>Response board <span class="count-badge" id="map-active-count">0</span></h2><p>Select a check for its location and history.</p></div></div><div class="map-check-list" id="map-check-list"><div class="loading-state"><span class="loader"></span>Loading checks…</div></div><div class="feed-card"><div class="feed-card-top"><span class="feed-camera-icon">◉</span><span class="feed-status-tag" id="map-feed-status">CONNECTING</span></div><strong>Camera 01 · East bar</strong><span id="map-feed-detail">Checking venue signal</span><div class="feed-progress"><i id="feed-progress-bar"></i></div><small>FIXED CAMERA <span>·</span> REHEARSAL SETUP</small></div></aside>
         </div>
         <section class="recent-section supervisor-recent"><div class="recent-heading"><div><span class="eyebrow">CLOSED LOOP</span><h2>Recently resolved</h2></div><span class="text-link">Shared incident history</span></div><div class="recent-list" id="map-recent-list"><div class="recent-empty">Resolved checks will appear here.</div></div></section>
         <footer class="app-footer"><span>GROUNDLINE <i>·</i> SUPERVISOR FLOOR VIEW</span><span><a href="/">Open responder queue</a></span></footer>

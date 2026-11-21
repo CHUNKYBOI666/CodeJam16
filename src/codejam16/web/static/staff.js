@@ -15,7 +15,7 @@
   const alerts = document.createElement('div');
   alerts.className = 'phone-alerts';
   alerts.setAttribute('aria-live', 'polite');
-  queueView.prepend(alerts);
+  root.append(alerts);
 
   function updateAlerts(items) {
     if (role !== 'responder') return;
@@ -28,7 +28,8 @@
       const link = document.createElement('a');
       link.href = '/?check=' + encodeURIComponent(item.id);
       link.dataset.id = item.id;
-      link.textContent = 'New welfare check · ' + item.zone_name + ' — ' + item.landmark + ' →';
+      link.innerHTML = `<small>NEW ALERT${item.source === 'rehearsal' ? ' · SAMPLE' : ''}</small><strong>Possible person down</strong><span>${esc(item.zone_name)} · ${esc(item.landmark)} →</span>`;
+      link.onclick = (event) => { event.preventDefault(); link.remove(); selectCheck(item.id); };
       alerts.prepend(link);
     }
     previousChecks = new Set(items.map(item => item.id));
@@ -74,6 +75,8 @@
     const indicator = document.getElementById('sync-indicator');
     indicator.classList.toggle('stale', stale);
     indicator.querySelector('b').textContent = stale ? 'Reconnecting' : 'In sync';
+    const phoneSync = document.getElementById('phone-sync');
+    if (phoneSync) phoneSync.textContent = stale ? 'Reconnecting' : 'In sync';
     const syncText = document.getElementById('last-sync');
     syncText.textContent = stale ? 'Waiting for connection…' : 'Updated just now';
     const led = document.querySelector('.connection-led');
@@ -81,8 +84,16 @@
   }
 
   function feedText(feed) {
-    const map = { live: ['Live camera', 'Feed connected · Camera 01'], rehearsal: ['Rehearsal mode', 'Sample checks · detector not connected'], offline: ['Camera offline', 'Existing checks remain available'] };
-    return map[feed?.status] || ['Signal unavailable', 'Check venue connection'];
+    const map = {
+      connecting: ['Starting detector', feed?.detail || 'Loading local fall model'],
+      unavailable: ['Detector unavailable', feed?.detail || 'Check the local model setup'],
+      rehearsal: ['Rehearsal mode', feed?.detail || 'Sample checks are ready'],
+      offline: ['Camera offline', feed?.detail || 'Existing checks remain available']
+    };
+    if (feed?.status === 'live') {
+      return [feed?.label || 'Live camera', feed?.detail || 'Fall detection active'];
+    }
+    return map[feed?.status] || ['Signal unavailable', feed?.detail || 'Check venue connection'];
   }
 
   function updateFeed(feed) {
@@ -93,14 +104,16 @@
     document.getElementById('map-feed-status').textContent = (feed?.label || label).toUpperCase();
     const bar = document.getElementById('feed-progress-bar');
     bar.style.width = feed?.status === 'live' ? '100%' : feed?.status === 'rehearsal' ? '55%' : '10%';
-    bar.style.background = feed?.status === 'offline' ? '#d58a73' : '#88aa91';
-    document.querySelector('.connection-led').classList.toggle('offline', feed?.status === 'offline');
+    bar.style.background = ['offline', 'unavailable'].includes(feed?.status) ? '#d58a73' : '#88aa91';
+    document.querySelector('.connection-led').classList.toggle('offline', ['offline', 'unavailable'].includes(feed?.status));
   }
 
   function renderStats() {
     const all = checks();
     const needs = all.filter((check) => check.status === 'needs_responder').length;
     const progress = all.length - needs;
+    const phoneCount = document.getElementById('phone-count');
+    if (phoneCount) phoneCount.textContent = `${needs} waiting · ${progress} in progress`;
     const resolved = snapshot?.recent?.length || 0;
     document.getElementById('stat-needs').textContent = needs;
     document.getElementById('stat-progress').textContent = progress;
@@ -144,6 +157,16 @@
     return '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.15 7-12a7 7 0 1 0-14 0c0 5.85 7 12 7 12Z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="9" r="2.4" stroke="currentColor" stroke-width="1.7"/></svg>';
   }
 
+  function locationMap(check) {
+    const center = { 'east-bar': [241, 118], 'main-floor': [592, 274] }[check.zone_id];
+    if (!center) return '';
+    return `<svg class="phone-map" viewBox="10 14 740 402" role="img" aria-label="Camera zone: ${esc(check.zone_name)}">
+      <use href="#venue-geometry"/><g transform="translate(${center.join(' ')})">
+      <circle r="31" fill="#cf634c" opacity=".15"/>
+      <path d="M0 1s-18-18-18-30a18 18 0 0 1 36 0C18-17 0 1 0 1Z" fill="#ba4834" stroke="white" stroke-width="3"/>
+      <circle cy="-28" r="6" fill="white"/></g></svg>`;
+  }
+
   function renderQueue() {
     const list = visibleChecks();
     if (!list.length) {
@@ -155,7 +178,7 @@
         <div class="signal-icon">${markerIcon()}</div>
         <div class="check-copy"><div class="check-title-line"><span class="status-dot ${esc(check.status)}"></span><span class="check-title">Possible person down</span>${check.source === 'rehearsal' ? '<span class="sample-chip">SAMPLE</span>' : ''}${check.overdue ? '<span class="overdue-chip">Overdue</span>' : ''}</div>
           <div class="check-subline"><span>${esc(check.zone_name)}</span><span class="sep">·</span><span>${esc(check.landmark)}</span></div></div>
-        <div class="check-trailing"><span class="time-ago">${esc(elapsed(check.detected_at))}</span><span class="row-owner">${esc(check.owner_name || statusLabel(check.status))}</span></div><span class="row-arrow">›</span>
+        ${role === 'responder' ? locationMap(check) : ''}<div class="check-trailing"><span class="time-ago">${esc(elapsed(check.detected_at))}</span><span class="row-owner">${esc(check.owner_name || statusLabel(check.status))}</span></div><span class="row-arrow">›</span>
       </article>`).join('');
     checkList.querySelectorAll('.check-row').forEach((row) => {
       row.addEventListener('click', () => selectCheck(row.dataset.id));
@@ -190,22 +213,35 @@
   function renderDetail() {
     const check = checks().find((item) => item.id === selectedId);
     if (!check) {
+      delete detailPanel.dataset.checkId;
       detailPanel.classList.remove('mobile-open');
       detailPanel.innerHTML = '<div class="empty-detail"><div class="empty-pin">⌖</div><h3>Select a check</h3><p>Choose a welfare check to see its location and next step.</p></div>';
       return;
     }
     const status = statusLabel(check.status);
-    detailPanel.classList.toggle('mobile-open', window.matchMedia('(max-width: 640px)').matches);
-    detailPanel.innerHTML = `
-      <div class="detail-content"><div class="detail-topline"><span>CHECK · ${esc(check.id.slice(0, 8).toUpperCase())}${check.source === 'rehearsal' ? ' · REHEARSAL SAMPLE' : ''}</span><button class="detail-close" aria-label="Close details">×</button></div>
+    detailPanel.classList.toggle('mobile-open', role === 'responder' || window.matchMedia('(max-width: 640px)').matches);
+    if (detailPanel.dataset.checkId !== check.id) {
+      const hasClip = check.source === 'rehearsal' && ['east-bar', 'main-floor'].includes(check.zone_id);
+      const clip = '/static/rehearsal/' + encodeURIComponent(check.zone_id);
+      detailPanel.innerHTML = `<div class="detail-content">
+        <div class="detail-heading-block"></div>
+        ${hasClip ? `<figure class="check-replay"><figcaption>Camera replay <small>AI rehearsal</small></figcaption>
+          <video controls playsinline muted preload="none" poster="${clip}.jpg" src="${clip}.mp4" aria-label="Simulated pose tracking at ${esc(check.zone_name)}"></video>
+          <p>Simulated pose tracking flags the person after two seconds down.</p></figure>` : ''}
+        <div class="detail-fields"></div></div>`;
+      detailPanel.dataset.checkId = check.id;
+    }
+    detailPanel.querySelector('.detail-heading-block').innerHTML = `
+        <div class="detail-topline"><span>CHECK · ${esc(check.id.slice(0, 8).toUpperCase())}${check.source === 'rehearsal' ? ' · REHEARSAL SAMPLE' : ''}</span><button class="detail-close" aria-label="Close details">×</button></div>
         <div class="detail-title"><div class="signal-icon">${markerIcon()}</div><div><h2>Possible person down</h2><p>${esc(status)}${check.overdue ? ' · Overdue' : ''}</p></div></div>
+      `;
+    detailPanel.querySelector('.detail-fields').innerHTML = `
         <div class="detail-alert"><span class="alert-mark">i</span><span>The camera noticed someone may be down. Please check in and decide what support is needed.</span></div>
-        <div class="detail-section"><div class="detail-section-title">LOCATION</div><div class="location-line"><div class="location-icon">${markerIcon()}</div><div class="location-copy"><strong>${esc(check.zone_name)}</strong><span>${esc(check.landmark)}</span></div></div></div>
+        <div class="detail-section check-location"><div class="detail-section-title">LOCATION</div>${role === 'responder' ? locationMap(check) : ''}<div class="location-line"><div class="location-icon">${markerIcon()}</div><div class="location-copy"><strong>${esc(check.zone_name)}</strong><span>${esc(check.landmark)}</span></div></div></div>
         <div class="detail-section"><div class="detail-facts"><div><span class="fact-label">DETECTED</span><span class="fact-value">${esc(date(check.detected_at))} <span style="color:#9aa49d;font-weight:400">· ${esc(elapsed(check.detected_at))}</span></span></div><div><span class="fact-label">STATUS</span><span class="fact-value">${esc(status)}</span></div></div></div>
         <div class="detail-section"><div class="detail-section-title">ASSIGNED TO</div><div class="owner-row">${check.owner_name ? `<span class="avatar">${esc(initials(check.owner_name))}</span><span>${esc(check.owner_name)}</span>` : '<span class="fact-value">Waiting for someone to help</span>'}</div></div>
         <div class="detail-section"><div class="detail-section-title">CHECK HISTORY</div><div class="timeline">${renderTimeline(check)}</div></div>
-        <div class="detail-actions">${actionsFor(check)}</div>
-      </div>`;
+        <div class="detail-actions">${actionsFor(check)}</div>`;
     detailPanel.querySelector('.detail-close')?.addEventListener('click', () => { selectedId = null; history.replaceState(null, '', location.pathname); renderDetail(); renderQueue(); });
     detailPanel.querySelector('[data-action]')?.addEventListener('click', (event) => runAction(check.id, event.currentTarget.dataset.action));
     detailPanel.querySelectorAll('[data-outcome]').forEach((button) => button.addEventListener('click', () => runAction(check.id, 'resolve', button.dataset.outcome)));
@@ -217,8 +253,8 @@
     if (!list.length) {
       host.innerHTML = '<div class="empty-state" style="min-height:125px"><strong>All clear</strong><p>No active checks across the venue.</p></div>';
     } else {
-      host.innerHTML = list.map((check) => `<div class="map-check-row" data-zone="${esc(check.zone_id)}"><span class="map-row-indicator ${esc(check.status)}"></span><div class="map-row-copy"><strong>Possible person down · ${esc(check.zone_name)}${check.source === 'rehearsal' ? ' · Sample' : ''}</strong><span>${esc(check.owner_name || 'Waiting for a responder')}${check.overdue ? ' · Overdue' : ''}</span></div><span class="map-row-time">${esc(elapsed(check.detected_at))}</span></div>`).join('');
-      host.querySelectorAll('.map-check-row').forEach((row) => row.addEventListener('click', () => openQueueForZone(row.dataset.zone)));
+      host.innerHTML = list.map((check) => `<button type="button" class="map-check-row" data-id="${esc(check.id)}"><span class="map-row-indicator ${esc(check.status)}"></span><div class="map-row-copy"><strong>Possible person down · ${esc(check.zone_name)}${check.source === 'rehearsal' ? ' · Sample' : ''}</strong><span>${esc(check.owner_name ? check.owner_name + ' · ' + (check.status === 'accepted' ? 'On the way' : statusLabel(check.status)) : 'Awaiting responder')}${check.overdue ? ' · Overdue' : ''}</span></div><span class="map-row-time">${esc(elapsed(check.detected_at))}</span></button>`).join('');
+      host.querySelectorAll('.map-check-row').forEach((row) => row.addEventListener('click', () => { setView('queue'); selectCheck(row.dataset.id); }));
     }
     document.querySelectorAll('.map-pin-group').forEach((pin) => {
       const open = () => openQueueForZone(pin.dataset.zone);
@@ -308,12 +344,14 @@
 
   function selectCheck(id) {
     selectedId = id;
+    history.replaceState(null, '', '?check=' + encodeURIComponent(id));
     renderQueue();
     renderDetail();
   }
 
   function setView(view) {
     const showMap = view === 'map' && role === 'supervisor';
+    if (showMap) detailPanel.querySelector('video')?.pause();
     queueView.classList.toggle('hidden', showMap);
     mapView.classList.toggle('hidden', !showMap);
     document.getElementById('breadcrumb-current').textContent = showMap ? 'Floor view' : 'Welfare checks';
