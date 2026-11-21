@@ -1,7 +1,7 @@
 # CodeJam16
 
 Venue welfare-check demo: a fixed camera spots a possible person down, and the
-responder queue and supervisor floor map share one check that exactly one
+check list and venue map share one check that exactly one
 responder owns. The plan is in
 [docs/superpowers/plans](docs/superpowers/plans/2026-11-21-codejam16-finish-and-demo.md).
 
@@ -31,37 +31,41 @@ export PYTHONPATH=src YOLO_CONFIG_DIR="$PWD/local/ultralytics" YOLO_AUTOINSTALL=
 .venv/bin/python -m codejam16.web.app --host 0.0.0.0 --camera-index 1 --fallback-clip local/laydown.MOV
 # Labelled rehearsal clip through the same detector:
 .venv/bin/python -m codejam16.web.app --host 0.0.0.0 --replay local/laydown.MOV
-# Sample checks only, no detector:
-.venv/bin/python -m codejam16.web.app --host 0.0.0.0 --no-detector
+# No detector, plus the overdue Main floor sample check (rehearsal only):
+.venv/bin/python -m codejam16.web.app --no-detector --with-sample
 ```
+
+The app listens on port 8016 on all interfaces and prints
+`Join at http://<lan-ip>:8016/join` on startup. That address is what the QR code points at.
 
 Zones, map pins and detector thresholds live in `config/venue.json`. Calibrate
 the camera by editing that file, not code.
 
 ## Staff app
 
-[Phone responder preview](docs/screenshots/responder.png) · [Supervisor map preview](docs/screenshots/supervisor.png)
+One Flask app and one SQLite incident store serve every phone and the projector laptop.
 
-The local staff app provides a responder queue and supervisor floor view backed by
-one SQLite incident store.
+**Joining.** Open `http://<lan-ip>:8016/join`, type a name, tap Join. There are no
+invite links or roles: everyone sees the same **Checks** and **Map** tabs and can
+Accept. Joining again in the same browser keeps the same person and only changes the
+name (**Change name** in the header). Old `/join/<anything>` links show the same form.
+A phone is one person, so a second person needs their own phone. On a laptop, use two
+browser profiles, one name each. The projector laptop joins as, say, "Floor desk" and
+keeps the Map tab open (from 900 px wide, Checks and Map sit side by side).
 
-Open `http://127.0.0.1:5000/join/responder-ada` for Ada’s responder session,
-`http://127.0.0.1:5000/join/responder-jordan` for Jordan’s separate responder
-session, or `http://127.0.0.1:5000/join/supervisor-morgan` for the supervisor
-view. For phone access on the private demo Wi-Fi, replace `127.0.0.1` with the
-Mac’s LAN address. Use separate browser profiles for Ada and Jordan so their
-session cookies remain independent.
+**Checks.** A camera check shows the place name and **Accept**. If two people tap at
+once, one name wins and the other sees "<Name> accepted this first." Only the owner can
+mark **I have arrived** and resolve it as **Confirmed person down**, **False alarm**, or
+**Couldn’t verify**. Renaming updates the name on that person’s open checks.
 
-Responders can accept a check, mark arrival, and resolve it as
-**Confirmed person down**, **False alarm**, or **Couldn’t verify**. The supervisor
-view shows the shared venue map, active checks and recent outcomes. The app polls
-the shared snapshot every 1.2 seconds while open. The database is stored in
-`local/`, which is ignored by Git. Set `CODEJAM_DATABASE` to use another SQLite
-path and `CODEJAM_OVERDUE_SECONDS` to change the waiting threshold (default: 300
-seconds).
+**Map.** One pin per zone in `config/venue.json`: coral when a check is waiting, teal
+when someone is on it. Tap a pin to open its check.
 
-The demo invitation tokens above are convenient local links, not production
-credentials. Keep this app on the controlled rehearsal network.
+The app polls the shared snapshot every 1.2 seconds. The database is stored in
+`local/`, which is ignored by Git. Set `CODEJAM_DATABASE` to use another SQLite path
+and `CODEJAM_OVERDUE_SECONDS` to change the waiting threshold (default: 300 seconds).
+By default no sample check exists, so strangers race on the real camera check. Keep
+this app on the controlled rehearsal network.
 
 ## Capture probe on macOS
 
