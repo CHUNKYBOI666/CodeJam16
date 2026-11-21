@@ -23,11 +23,20 @@ Test (no camera or model weights needed):
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
 ```
 
-Launch the staff app:
+Launch the staff app. Pick one detector source:
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m codejam16.web.app --host 0.0.0.0 --port 5000
+export PYTHONPATH=src YOLO_CONFIG_DIR="$PWD/local/ultralytics" YOLO_AUTOINSTALL=false
+# Live iPhone camera, falling back to the clip if the camera fails before a check:
+.venv/bin/python -m codejam16.web.app --host 0.0.0.0 --camera-index 1 --fallback-clip local/laydown.MOV
+# Labelled rehearsal clip through the same detector:
+.venv/bin/python -m codejam16.web.app --host 0.0.0.0 --replay local/laydown.MOV
+# Sample checks only, no detector:
+.venv/bin/python -m codejam16.web.app --host 0.0.0.0 --no-detector
 ```
+
+Zones, map pins and detector thresholds live in `config/venue.json`. Calibrate
+the camera by editing that file, not code.
 
 ## Staff app
 

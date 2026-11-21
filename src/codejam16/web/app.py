@@ -10,7 +10,9 @@ from urllib.parse import urlparse
 
 from flask import Flask, abort, jsonify, make_response, redirect, render_template, request, url_for
 
+from codejam16.live import FeedState
 from codejam16.store import IncidentStore
+from codejam16.venue import DEFAULT_VENUE_PATH, load_venue
 
 
 DEFAULT_INVITES = {
@@ -20,7 +22,8 @@ DEFAULT_INVITES = {
 }
 
 
-def create_app(database_path: str | None = None, *, seed_demo: bool = True) -> Flask:
+def create_app(database_path: str | None = None, *, seed_demo: bool = True, venue=None,
+               feed: FeedState | None = None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     default_db = Path(__file__).resolve().parents[3] / "local" / "staff.sqlite3"
     db_path = database_path or os.environ.get("CODEJAM_DATABASE", str(default_db))
@@ -36,8 +39,10 @@ def create_app(database_path: str | None = None, *, seed_demo: bool = True) -> F
     )
     store = IncidentStore(db_path, app.config["OVERDUE_SECONDS"])
     app.extensions["incident_store"] = store
-    app.extensions["feed_state"] = {"status": "rehearsal", "label": "Rehearsal mode",
-                                     "detail": "Sample checks are ready · camera detector not connected"}
+    venue = venue or load_venue()
+    feed = feed or FeedState()
+    app.extensions["venue"] = venue
+    app.extensions["feed_state"] = feed
 
     invites = dict(DEFAULT_INVITES)
     # Optional production-style tokens map to the same local demo staff identities.
@@ -48,6 +53,11 @@ def create_app(database_path: str | None = None, *, seed_demo: bool = True) -> F
         store.ensure_invitation(token, staff_id, name, role)
     if seed_demo:
         store.seed_demo()
+
+    def snapshot(viewer):
+        result = store.snapshot(viewer, feed.snapshot())
+        result["zones"] = venue.to_public()
+        return result
 
     def current_user():
         return store.get_session(request.cookies.get(app.config["SESSION_COOKIE_NAME"]))
@@ -121,7 +131,7 @@ def create_app(database_path: str | None = None, *, seed_demo: bool = True) -> F
     def state(_user):
         raw = request.cookies.get(app.config["SESSION_COOKIE_NAME"])
         current = store.get_session(raw)
-        result = store.snapshot(current, app.extensions["feed_state"])
+        result = snapshot(current)
         result["csrf_token"] = store.get_csrf(raw)
         return jsonify(result)
 
@@ -136,7 +146,7 @@ def create_app(database_path: str | None = None, *, seed_demo: bool = True) -> F
         if not ok:
             code = 404 if incident is None else 409
             return jsonify({"error": message, "check": incident}), code
-        state = store.snapshot(user, app.extensions["feed_state"])
+        state = snapshot(user)
         state["csrf_token"] = store.get_csrf(request.cookies.get(app.config["SESSION_COOKIE_NAME"]))
         return jsonify({"check": incident, "state": state})
 
@@ -146,14 +156,44 @@ def create_app(database_path: str | None = None, *, seed_demo: bool = True) -> F
 app = create_app()
 
 
-def main() -> None:
+def predictor_loader(weights: Path):
+    """Return a loader that refuses to fall back to downloading missing weights."""
+    def load():
+        if not weights.is_file():
+            raise FileNotFoundError(f"pose weights not found: {weights}")
+        from codejam16 import vision_cli
+        return vision_cli._load_pose_predictor(weights)
+    return load
+
+
+def main(argv=None) -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Run the local CodeJam16 staff app")
     parser.add_argument("--host", default=os.environ.get("CODEJAM_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("CODEJAM_PORT", "5000")))
-    args = parser.parse_args()
-    app.run(host=args.host, port=args.port, debug=False, use_reloader=False, threaded=True)
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--camera-index", type=int, help="Run the detector on this macOS camera")
+    source.add_argument("--replay", type=Path, help="Run the detector on a labelled rehearsal clip")
+    source.add_argument("--no-detector", action="store_true", help="Serve sample checks only (default)")
+    parser.add_argument("--fallback-clip", type=Path, help="Clip to replay if the camera fails before a check")
+    parser.add_argument("--venue", type=Path, default=DEFAULT_VENUE_PATH)
+    parser.add_argument("--camera-id", default="demo-camera")
+    parser.add_argument("--weights", type=Path, default=Path("local/yolo26n-pose.pt"))
+    args = parser.parse_args(argv)
+
+    venue = load_venue(args.venue)
+    feed = FeedState()
+    server = create_app(venue=venue, feed=feed)
+    if args.camera_index is not None or args.replay is not None:
+        from codejam16.live import DetectorWorker
+
+        DetectorWorker(venue=venue, camera_id=args.camera_id, feed=feed,
+                       deliver=server.extensions["incident_store"].create_incident,
+                       load_predictor=predictor_loader(args.weights),
+                       camera_index=args.camera_index, replay_path=args.replay,
+                       fallback_clip=args.fallback_clip).start()
+    server.run(host=args.host, port=args.port, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":
