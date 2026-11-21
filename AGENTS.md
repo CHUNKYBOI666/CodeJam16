@@ -2,7 +2,7 @@
 
 ## Project Structure
 
-CodeJam16 is a venue welfare demo. [README.md](README.md) is the project entry point. The [engineering plan](docs/designs/live-venue-welfare-checks.md) records the architecture, build order, and rehearsal criteria. Application source, tests, and demo assets are still to be added.
+CodeJam16 is a venue welfare demo. [README.md](README.md) is the project entry point. The [engineering plan](docs/designs/live-venue-welfare-checks.md) records the architecture, build order, and rehearsal criteria. Vision code lives in `vision/` with its tests in `tests/vision/`. The Flask backend and the staff frontend get their own folders when they land.
 
 Start with the local Python detector. Use OpenCV to read recorded or live video and pretrained YOLO26n-pose to estimate body points. Keep frame capture, episode detection, and incident storage distinct. The planned Flask app will use SQLite and serve the responder queue and supervisor map.
 

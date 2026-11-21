@@ -10,8 +10,8 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from codejam16 import capture
-from codejam16.capture_cli import main
+import capture
+from capture_cli import main
 
 
 def image(value):
