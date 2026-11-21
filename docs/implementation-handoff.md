@@ -5,7 +5,7 @@ Use [Repository Guidelines](../AGENTS.md) and the [engineering plan](designs/liv
 | Area | Branch | Owns | First deliverable |
 | --- | --- | --- | --- |
 | 1 · Capture + detector (David) | `team/vision` | `vision/` (capture, pose model, detector, calibration, overlay, clip evaluation, capture probe), `tests/vision/` | Run local pretrained YOLO26n-pose on staged clips and the live iPhone feed through the same capture path. Print one timestamped event per sustained down episode. Check ordinary movement, losing sight of the actor, and recovery before a second episode. Prove changing frames from the unplugged iPhone, document the USB fallback, and report a stalled or disconnected feed. |
-| 2 · Staff web app (teammate) | `team/staff-app` | `src/codejam16/web/`, `src/codejam16/store.py`, staff workflow tests | Seed Flask and SQLite with the sample event. Verify two responders can claim at once, one wins, and the winner keeps their assignment after refresh and can record an outcome. |
+| 2 · Staff web app (teammate) | `team/staff-app` | `src/codejam16/web/`, `src/codejam16/store.py`, staff workflow tests | Seed Flask and SQLite with the sample event. Match the locked light UI in [staff-app.html](mockups/staff-app.html). Verify two responders can claim at once, one wins, and the winner keeps their assignment after refresh and can record an outcome. |
 
 Camera capture was originally a separate area on `team/capture`. Its adapter was folded into `vision/capture.py` and that branch is retired. The early `team/detector` attempt is superseded by `vision/detector.py`.
 

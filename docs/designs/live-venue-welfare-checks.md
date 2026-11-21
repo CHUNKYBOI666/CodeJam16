@@ -605,6 +605,8 @@ The local YOLO26n-pose and Python design supplies the alert. Confirmation comes 
 
 ### Detector handoff and staff web app
 
+The locked staff UI is [docs/mockups/staff-app.html](../mockups/staff-app.html), chosen on 21 Nov 2026. Implement the responder phone and supervisor desk to match that light layout. While a check is Accepted or Arrived, both views say **Being resolved** and the map pin is teal. A recorded outcome is Closed and leaves the active map. The dark prototype is retired.
+
 The implementation plan uses one Python process on the Mac with Flask, HTML templates, and browser JavaScript. One capture worker runs beside the web server. Live and replay inputs both call the same detector and incident writer. Starting the web server starts one capture worker. The detector and web requests each use their own SQLite connection. [Flask quickstart](https://flask.palletsprojects.com/en/stable/quickstart/)
 
 - **Create the alert.** On confirmation, the detector assigns an episode ID and passes it with the signal, camera ID, configured zone, source, and detection time to an ordinary Python function. The function inserts the check and its first history entry in one short SQLite transaction. The episode ID is unique. If a write must be retried, reuse the ID. If the ID already exists, return the saved check and its current state. A sustained write failure surfaces as a detector service error. The worker releases or reuses the pending event only after it knows whether a check was committed. [SQLite UPSERT](https://www.sqlite.org/lang_upsert.html)
