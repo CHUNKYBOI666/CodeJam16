@@ -12,10 +12,17 @@ import sys
 from .capture import CaptureError, CaptureOpenError, LiveFeedLost
 from .pipeline import DeliveryError, PersonDownPipeline
 from .pose_trace import PoseTrace
+from .venue import DEFAULT_VENUE_PATH, load_venue
 
 
 class ReplayError(Exception):
     """The replay could not be completed."""
+
+
+THRESHOLDS = ("confirmation_seconds", "rearm_seconds", "maximum_observation_gap_ms",
+              "minimum_keypoint_confidence", "down_angle_degrees", "upright_angle_degrees")
+DEFAULT_THRESHOLDS = dict(confirmation_seconds=2.0, rearm_seconds=2.0, maximum_observation_gap_ms=500,
+                          minimum_keypoint_confidence=0.4, down_angle_degrees=30, upright_angle_degrees=60)
 
 
 def _parse_args(argv):
@@ -32,23 +39,37 @@ def _parse_args(argv):
         default=Path("local/yolo26n-pose.pt"),
         help="Path to the pretrained YOLO26n-pose checkpoint (default: %(default)s)",
     )
+    parser.add_argument("--venue", type=Path, default=DEFAULT_VENUE_PATH,
+                        help="Venue config supplying zone, floor box and thresholds (default: %(default)s)")
     parser.add_argument(
         "--floor-box",
         nargs=4,
         type=float,
-        required=True,
         metavar=("LEFT", "TOP", "RIGHT", "BOTTOM"),
-        help="Floor rectangle as fractions of frame width and height",
+        help="Override the venue floor rectangle, as fractions of frame width and height",
     )
     parser.add_argument("--camera-id", default="demo-camera")
-    parser.add_argument("--zone-id", default="east-bar")
-    parser.add_argument("--confirmation-seconds", type=float, default=2.0)
-    parser.add_argument("--rearm-seconds", type=float, default=2.0)
-    parser.add_argument("--maximum-observation-gap-ms", type=float, default=500)
-    parser.add_argument("--minimum-keypoint-confidence", type=float, default=0.4)
-    parser.add_argument("--down-angle-degrees", type=float, default=30)
-    parser.add_argument("--upright-angle-degrees", type=float, default=60)
+    parser.add_argument("--zone-id")
+    for name in THRESHOLDS:
+        parser.add_argument(f"--{name.replace('_', '-')}", type=float)
     return parser.parse_args(argv)
+
+
+def _detector_options(args):
+    """Combine the venue camera's settings with any explicit command-line overrides."""
+    camera = load_venue(args.venue).cameras.get(args.camera_id)
+    options = dict(DEFAULT_THRESHOLDS)
+    if camera is not None:
+        options.update(camera.detector, zone_id=camera.zone_id, floor_box=camera.floor_box)
+    options["camera_id"] = args.camera_id
+    if args.zone_id is not None or "zone_id" not in options:
+        options["zone_id"] = args.zone_id or "east-bar"
+    if args.floor_box is not None:
+        options["floor_box"] = tuple(args.floor_box)
+    if "floor_box" not in options:
+        raise ValueError(f"camera {args.camera_id} is not in {args.venue}; pass --floor-box")
+    options.update({name: getattr(args, name) for name in THRESHOLDS if getattr(args, name) is not None})
+    return options
 
 
 def _load_pose_predictor(weights):
@@ -100,20 +121,12 @@ def main(argv=None):
 
 
 def _run(args, observe_pose):
+    options = _detector_options(args)
     if not args.weights.is_file():
         raise ReplayError(f"pose checkpoint is not a local file: {args.weights}")
     with redirect_stdout(sys.stderr):
         predictor = _load_pose_predictor(args.weights)
-    pipeline = PersonDownPipeline(
-        predictor, floor_box=args.floor_box, camera_id=args.camera_id,
-        zone_id=args.zone_id, confirmation_seconds=args.confirmation_seconds,
-        rearm_seconds=args.rearm_seconds,
-        maximum_observation_gap_ms=args.maximum_observation_gap_ms,
-        minimum_keypoint_confidence=args.minimum_keypoint_confidence,
-        down_angle_degrees=args.down_angle_degrees,
-        upright_angle_degrees=args.upright_angle_degrees,
-        observe_pose=observe_pose,
-    )
+    pipeline = PersonDownPipeline(predictor, observe_pose=observe_pose, **options)
     if args.clip is not None:
         pipeline.run_replay(args.clip, _print_event, constant_fps=args.constant_fps)
         print("End of replay", file=sys.stderr)

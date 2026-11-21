@@ -108,15 +108,15 @@ yet, or lets staff finish an existing check.
 Use the Quick start environment and weights. Keep recordings and generated traces
 in ignored `local/`.
 
-Run a staged replay or a live Continuity Camera. The floor rectangle is normalized
-left, top, right, bottom and must be calibrated to the camera view:
+Run a staged replay or a live Continuity Camera. The floor box, zone and thresholds
+come from `config/venue.json`; `--floor-box LEFT TOP RIGHT BOTTOM` (fractions of the
+frame) and the threshold flags override it for a single run:
 
 ```sh
 PYTHONPATH=src YOLO_CONFIG_DIR="$PWD/local/ultralytics" YOLO_AUTOINSTALL=false \
-  .venv/bin/python -m codejam16.vision_cli local/staged.mp4 \
-  --floor-box 0.10 0.62 0.95 0.98 --pose-trace local/poses.jsonl
+  .venv/bin/python -m codejam16.vision_cli local/staged.mp4 --pose-trace local/poses.jsonl
 PYTHONPATH=src YOLO_CONFIG_DIR="$PWD/local/ultralytics" YOLO_AUTOINSTALL=false \
-  .venv/bin/python -m codejam16.vision_cli --camera-index 1 --floor-box 0.10 0.62 0.95 0.98
+  .venv/bin/python -m codejam16.vision_cli --camera-index 1
 ```
 
 The event stream uses stdout and diagnostics use stderr. The optional pose trace

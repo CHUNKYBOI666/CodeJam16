@@ -400,3 +400,28 @@ class ReplayCliTests(unittest.TestCase):
         self.assertEqual((status, stdout), (130, ""))
         self.assertTrue(capture.released)
         self.assertIn("Vision pipeline interrupted", stderr)
+
+
+class VisionCliVenueTests(unittest.TestCase):
+    REPO_VENUE = str(Path(__file__).resolve().parents[1] / "config" / "venue.json")
+
+    def options(self, *argv):
+        return vision_cli._detector_options(vision_cli._parse_args(["clip.mp4", *argv]))
+
+    def test_vision_cli_reads_venue(self):
+        options = self.options("--venue", self.REPO_VENUE)
+        self.assertEqual(options["floor_box"], (0.10, 0.62, 0.95, 0.98))
+        self.assertEqual(options["zone_id"], "east-bar")
+        self.assertEqual(options["camera_id"], "demo-camera")
+        self.assertEqual(options["confirmation_seconds"], 2.0)
+
+    def test_cli_flags_override_venue(self):
+        options = self.options("--venue", self.REPO_VENUE, "--floor-box", "0.2", "0.5", "0.9", "0.99",
+                               "--confirmation-seconds", "3")
+        self.assertEqual(options["floor_box"], (0.2, 0.5, 0.9, 0.99))
+        self.assertEqual(options["confirmation_seconds"], 3.0)
+        self.assertEqual(options["rearm_seconds"], 2.0)
+
+    def test_unknown_camera_requires_floor_box(self):
+        with self.assertRaisesRegex(ValueError, "floor"):
+            self.options("--venue", self.REPO_VENUE, "--camera-id", "other-camera")
