@@ -1,0 +1,6 @@
+# Python 3.12 (not 3.14). Versions verified on the M3 demo Mac, 2026-11-21.
+ultralytics==8.4.216
+opencv-python==5.1.0.95
+torch==2.15.0
+torchvision==0.29.2
+numpy==2.5.5

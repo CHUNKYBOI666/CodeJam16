@@ -44,3 +44,19 @@ can open a replay. A stuck native reader may require restarting the process
 before reopening the camera. At integration, the caller shows the camera as
 offline, starts labeled replay with fresh detector timing if no check exists
 yet, or lets staff finish an existing check.
+
+## Setup (Python 3.12)
+
+```bash
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
+```
+
+## Pose overlay
+
+```bash
+.venv/bin/python cv/run.py --source 0                    # webcam
+.venv/bin/python cv/run.py --source clips/lie_down.mp4   # recording (paced at real time)
+```
+
+Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dropping), `--device cpu`.
+Weights download to `local/weights/` on first run. `clips/` and `local/` are git-ignored.

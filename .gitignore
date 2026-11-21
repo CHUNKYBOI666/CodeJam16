@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.pyc
 .pytest_cache/
 .ruff_cache/
 .env
@@ -14,3 +15,8 @@ __pycache__/
 *.sqlite3-shm
 *.sqlite3-wal
 /local/
+# Recordings, weights, demo DBs stay local
+clips/
+local/
+*.pt
+*.db
