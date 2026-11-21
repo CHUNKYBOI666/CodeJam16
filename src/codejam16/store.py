@@ -66,13 +66,6 @@ class IncidentStore:
                     note TEXT,
                     created_at TEXT NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS invitations (
-                    token_hash TEXT PRIMARY KEY,
-                    staff_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    expires_at TEXT NOT NULL
-                );
                 CREATE TABLE IF NOT EXISTS sessions (
                     token_hash TEXT PRIMARY KEY,
                     staff_id TEXT NOT NULL,
@@ -86,40 +79,31 @@ class IncidentStore:
                 CREATE INDEX IF NOT EXISTS incident_status_idx ON incidents(status);
             """)
 
-    def ensure_invitation(self, token: str, staff_id: str, name: str, role: str) -> None:
-        expires = iso(utc_now() + timedelta(days=7))
-        with self.connect() as db:
-            db.execute("""INSERT INTO invitations(token_hash, staff_id, name, role, expires_at)
-                VALUES (?, ?, ?, ?, ?) ON CONFLICT(token_hash) DO UPDATE SET
-                staff_id=excluded.staff_id, name=excluded.name, role=excluded.role,
-                expires_at=excluded.expires_at""", (_hash(token), staff_id, name, role, expires))
-
-    def invitation(self, token: str):
-        with self.connect() as db:
-            row = db.execute("SELECT staff_id, name, role, expires_at FROM invitations WHERE token_hash=?",
-                             (_hash(token),)).fetchone()
-        if not row or row["expires_at"] <= iso(utc_now()):
+    def join_by_name(self, name: str, existing_token: str | None = None):
+        """Create a person from a display name, or rename the person this browser already is."""
+        name = (name or "").strip()[:40]
+        if not name:
             return None
-        return dict(row)
-
-    def create_session(self, invite_token: str) -> str | None:
-        identity = self.invitation(invite_token)
-        if not identity:
-            return None
-        raw = secrets.token_urlsafe(32)
-        csrf = secrets.token_urlsafe(24)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            valid = db.execute("SELECT 1 FROM invitations WHERE token_hash=? AND expires_at>?",
-                               (_hash(invite_token), iso(utc_now()))).fetchone()
-            if not valid:
-                db.rollback()
-                return None
-            db.execute("INSERT INTO sessions(token_hash, staff_id, name, role, csrf, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-                       (_hash(raw), identity["staff_id"], identity["name"], identity["role"], csrf,
-                        iso(utc_now() + timedelta(days=7))))
+            row = None
+            if existing_token:
+                row = db.execute("SELECT staff_id, csrf, expires_at FROM sessions WHERE token_hash=?",
+                                 (_hash(existing_token),)).fetchone()
+                if row and row["expires_at"] <= iso(utc_now()):
+                    row = None
+            if row:
+                staff_id, raw, csrf = row["staff_id"], existing_token, row["csrf"]
+                db.execute("UPDATE sessions SET name=? WHERE staff_id=?", (name, staff_id))
+                db.execute("UPDATE incidents SET owner_name=? WHERE owner_id=? AND status IN ('accepted', 'arrived')",
+                           (name, staff_id))
+            else:
+                staff_id = "p-" + secrets.token_hex(6)
+                raw, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
+                db.execute("INSERT INTO sessions(token_hash, staff_id, name, role, csrf, expires_at) VALUES (?, ?, ?, 'responder', ?, ?)",
+                           (_hash(raw), staff_id, name, csrf, iso(utc_now() + timedelta(days=7))))
             db.commit()
-        return raw, csrf
+        return raw, csrf, {"id": staff_id, "name": name, "role": "responder"}
 
     def get_session(self, raw_token: str | None):
         if not raw_token:
@@ -174,13 +158,10 @@ class IncidentStore:
             if not row:
                 db.rollback()
                 return False, "Check not found", None
-            if actor["role"] != "responder":
-                db.rollback()
-                return False, "Only responders can update a check", dict(row)
             if action == "accept":
                 if row["status"] != "needs_responder":
                     db.rollback()
-                    return False, "This check already has an owner", dict(row)
+                    return False, f"{row['owner_name']} accepted this first.", dict(row)
                 db.execute("UPDATE incidents SET status='accepted', owner_id=?, owner_name=? WHERE id=? AND status='needs_responder'",
                            (actor["id"], actor["name"], incident_id))
                 status, event = "accepted", "accepted"
