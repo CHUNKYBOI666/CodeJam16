@@ -6,7 +6,7 @@ Use [Repository Guidelines](../AGENTS.md) and the [engineering plan](designs/liv
 | --- | --- | --- | --- |
 | 1 · Detector | `team/detector` | `src/codejam16/detector.py`, `src/codejam16/vision_cli.py`, detector tests | Run local pretrained YOLO26n-pose on a staged clip. Print one timestamped event per sustained down episode. Check ordinary movement, losing sight of the actor, and recovery before a second episode. |
 | 2 · Camera capture | `team/capture` | `src/codejam16/capture.py`, capture tests and device notes | Supply the same frame format for file replay and Continuity Camera. Prove changing frames from a recording and from the unplugged iPhone on the demo Mac. Document the USB fallback and how capture reports a stalled or disconnected feed. |
-| 3 · Staff app | `team/staff-app` | `src/codejam16/web/`, `src/codejam16/store.py`, staff workflow tests | Seed Flask and SQLite with the sample event. Verify two responders can claim at once, one wins, and the winner keeps their assignment after refresh and can record an outcome. |
+| 3 · Staff app | `team/staff-app` | `src/codejam16/web/`, `src/codejam16/store.py`, staff workflow tests | Seed Flask and SQLite with the sample event. Match the locked light UI in [staff-app.html](mockups/staff-app.html). Verify two responders can claim at once, one wins, and the winner keeps their assignment after refresh and can record an outcome. |
 
 ## Shared interfaces
 
