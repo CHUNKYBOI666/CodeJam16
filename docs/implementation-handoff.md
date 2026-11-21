@@ -20,4 +20,4 @@ Use [Repository Guidelines](../AGENTS.md) and the [engineering plan](designs/liv
 2. Each teammate reviews their diff against the assigned deliverable. Report the exact command or rehearsal steps used, what passed, and what still needs live hardware. Keep branch changes small enough to review by responsibility.
 3. Integrate capture and detector, then connect real events to the staff app. Verify the full workflow with two independent responder sessions. Add map zones after the detector passes the rehearsal check.
 
-If the team publishes these branches, merge feature pull requests into `team/integration`. Include the evidence from step 2 in each pull request.
+The teammate branches are published. Open feature pull requests into `team/integration` and include the evidence from step 2 in each pull request.
