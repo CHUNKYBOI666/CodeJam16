@@ -2,115 +2,42 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f5f6f3">
-  <title>{{ 'Supervisor view' if viewer.role == 'supervisor' else 'Responder queue' }} · Groundline</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Welfare checks · Groundline</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='staff.css') }}">
 </head>
 <body>
-  <div class="app-frame" id="app" data-role="{{ viewer.role }}" data-view="{{ initial_view }}">
-    <aside class="sidebar">
-      <a class="brand" href="/" aria-label="Groundline home">
-        <span class="brand-mark"><span></span><span></span><span></span></span>
-        <span>groundline</span>
-      </a>
-      <div class="venue-switcher">
-        <div class="venue-monogram">M</div>
-        <div class="venue-label"><strong>Mercury Hall</strong><small>Tonight · East venue</small></div>
-        <span class="chevron">⌄</span>
-      </div>
-      <div class="nav-caption">WORKSPACE</div>
-      <nav class="main-nav" aria-label="Workspace navigation">
-        {% if viewer.role == 'supervisor' %}
-        <a href="/supervisor" class="nav-item" data-nav="map"><span class="nav-icon icon-map"></span><span>Floor view</span><span class="nav-count" id="nav-open-count">—</span></a>
-        {% endif %}
-        <a href="/" class="nav-item" data-nav="queue"><span class="nav-icon icon-inbox"></span><span>Welfare checks</span><span class="nav-count" id="nav-queue-count">—</span></a>
-        <div class="nav-divider"></div>
-        <div class="nav-caption nav-caption-spaced">VENUE</div>
-        <div id="zone-nav-list"></div>
-      </nav>
-      <div class="sidebar-bottom">
-        <div class="connection-card"><span class="connection-led"></span><div><strong id="feed-label">Connecting…</strong><small id="feed-detail">Checking venue signal</small></div><span class="connection-menu">···</span></div>
-        <div class="staff-card">
-          <div class="avatar">{{ viewer.name.split(' ')[0][0] }}{{ viewer.name.split(' ')[-1][0] }}</div>
-          <div class="staff-info"><strong>{{ viewer.name }}</strong><small>{{ 'Supervisor' if viewer.role == 'supervisor' else 'Responder' }}</small></div>
-          <form action="/logout" method="post"><button class="logout-button" aria-label="Sign out" title="Sign out">↗</button></form>
-        </div>
-      </div>
-    </aside>
-
-    <main class="main-area">
-      <header class="topbar">
-        <div class="breadcrumbs"><span>Mercury Hall</span><i>/</i><strong id="breadcrumb-current">Welfare checks</strong></div>
-        <div class="topbar-right"><div class="live-pill" id="sync-indicator"><span></span><b>Syncing</b></div><div class="topbar-divider"></div><span class="shift-label">SATURDAY SHIFT</span></div>
-      </header>
-
-      <section class="page-content" id="queue-view" aria-label="Responder welfare check queue">
-        <div class="page-heading">
-          <div><div class="eyebrow" id="queue-eyebrow">FIELD RESPONSE <span>·</span> EAST VENUE</div><h1>Welfare checks<span class="heading-period">.</span></h1><p class="page-subtitle">See what needs attention and where to go.</p></div>
-          <div class="heading-meta"><div class="time-label" id="current-time">—</div><div class="updated-label"><span class="tiny-led"></span>Updates automatically</div></div>
-        </div>
-
-        <div class="stats-row">
-          <div class="stat-card"><div class="stat-name">NEEDS HELP</div><div class="stat-bottom"><strong id="stat-needs">0</strong><span class="stat-accent coral"></span></div></div>
-          <div class="stat-card"><div class="stat-name">IN PROGRESS</div><div class="stat-bottom"><strong id="stat-progress">0</strong><span class="stat-accent blue"></span></div></div>
-          <div class="stat-card"><div class="stat-name">RESOLVED TONIGHT</div><div class="stat-bottom"><strong id="stat-resolved">0</strong><span class="stat-note">checks</span></div></div>
-          <div class="shift-stat"><span class="shift-stat-icon">↗</span><div><strong>Stay in sync</strong><span>Your team sees each update live.</span></div></div>
-        </div>
-
-        <div class="workspace-grid">
-          <section class="queue-panel panel">
-            <div class="panel-heading"><div><h2>Active checks <span class="count-badge" id="active-count">0</span></h2><p>Unclaimed checks appear first.</p></div><span class="filter-button">Oldest first</span></div>
-            <div class="queue-filters"><button class="filter-tab active" data-filter="all">All checks <span id="filter-all-count">0</span></button><button class="filter-tab" data-filter="needs_responder">Needs responder <span id="filter-needs-count">0</span></button><button class="filter-tab" data-filter="mine">Assigned to me <span id="filter-mine-count">0</span></button></div>
-            <div class="check-list" id="check-list"><div class="loading-state"><span class="loader"></span>Loading checks…</div></div>
-            <div class="queue-footer"><span class="tiny-led"></span>Shared with your response team<span class="footer-refresh" id="last-sync">Updated just now</span></div>
-          </section>
-
-          <aside class="detail-panel panel" id="detail-panel"><div class="empty-detail"><div class="empty-pin">⌖</div><h3>Select a check</h3><p>Choose a welfare check to see its location and next step.</p></div></aside>
-        </div>
-
-        <section class="recent-section"><div class="recent-heading"><div><span class="eyebrow">CLOSED LOOP</span><h2>Recently resolved</h2></div><a href="#recent-list" class="text-link">View history <span>→</span></a></div><div class="recent-list" id="recent-list"><div class="recent-empty">Resolved checks will appear here.</div></div></section>
-        <footer class="app-footer"><span>GROUNDLINE <i>·</i> VENUE CARE, CONNECTED</span><span></span></footer>
+  <div class="app" id="app" data-initial-tab="{{ initial_tab }}">
+    <header class="head">
+      <b>{{ viewer.name }}</b>
+      <span class="sync" id="sync" role="status"></span>
+      <a href="/join">Change name</a>
+    </header>
+    <nav class="tabs" aria-label="Views">
+      <button type="button" data-tab="checks" aria-pressed="true">Checks</button>
+      <button type="button" data-tab="map" aria-pressed="false">Map</button>
+    </nav>
+    <div class="panes">
+      <section class="pane on" id="checks-pane" aria-label="Checks">
+        <div id="checks"></div>
+        <div class="recent" id="recent"></div>
       </section>
-
-      <section class="page-content supervisor-content hidden" id="map-view" aria-label="Supervisor venue floor view">
-        <div class="page-heading map-heading"><div><div class="eyebrow">SUPERVISOR VIEW <span>·</span> LIVE VENUE</div><h1>Floor view<span class="heading-period">.</span></h1><p class="page-subtitle">One shared picture of what’s happening across your venue.</p></div><div class="heading-meta"><div class="live-pill map-live" id="map-live-indicator"><span></span><b>Live overview</b></div><div class="updated-label"><span class="tiny-led"></span>Updates automatically</div></div></div>
-        <div class="supervisor-summary"><div><span class="eyebrow">TONIGHT’S RESPONSE</span><h2><span id="map-open-count">0</span> active <span id="map-check-label">checks</span></h2><p>Checks, owners and venue signal in one view.</p></div><div class="summary-metrics"><div><strong id="map-needs-count">0</strong><span>Need a responder</span></div><div><strong id="map-progress-count">0</strong><span>In progress</span></div><div><strong id="map-resolved-count">0</strong><span>Resolved</span></div></div></div>
-        <div class="supervisor-grid">
-          <section class="map-card panel"><div class="panel-heading"><div><h2>Venue map <span class="map-live-label"><span class="tiny-led"></span>LIVE</span></h2><p>Camera 01 · fixed east-facing position</p></div></div>
-            <div class="venue-map-wrap"><div class="map-label map-east">EAST WING</div><div class="map-label map-west">MAIN HALL</div>
-              <svg class="venue-map" viewBox="0 0 760 440" role="img" aria-label="Venue floor plan showing the East bar, stairs and main floor">
-                <defs><pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1" fill="#dce4dd"/></pattern><pattern id="bar-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#f5f3ec"/><path d="M0 0v8" stroke="#e8e4d8" stroke-width="2"/></pattern></defs>
-                <rect x="21" y="25" width="718" height="382" rx="25" fill="#fafbf8" stroke="#d6ded7" stroke-width="2"/>
-                <path d="M43 46h380v333H43z" fill="url(#dots)" stroke="#d9e1d9" stroke-width="1.5"/>
-                <path d="M430 46h285v145H430z" fill="#f0f3ef" stroke="#d9e1d9" stroke-width="1.5"/>
-                <path d="M430 197h285v182H430z" fill="#f6f7f3" stroke="#d9e1d9" stroke-width="1.5"/>
-                <path d="M56 58h190v73H56z" fill="url(#bar-hatch)" stroke="#cdd6ce" stroke-width="1.5"/>
-                <path d="M72 70h158v35H72z" fill="#e9e3d4" stroke="#d3cbbb"/><path d="M72 112h158" stroke="#c9c1af" stroke-width="2"/>
-                <path d="M284 59h112v57H284z" fill="#ecf1ea" stroke="#d5dfd5"/><path d="M296 72h89v31" fill="none" stroke="#d8e1d6" stroke-dasharray="4 4"/>
-                <path d="M254 143h165" stroke="#d6ded7" stroke-width="1.5" stroke-dasharray="6 6"/>
-                <rect x="449" y="62" width="247" height="112" rx="8" fill="#fafbf8" stroke="#dce3dc"/>
-                <circle cx="487" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="562" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="637" cy="97" r="15" fill="#f0f2eb" stroke="#dce3dc"/>
-                <circle cx="487" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="562" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/><circle cx="637" cy="142" r="15" fill="#f0f2eb" stroke="#dce3dc"/>
-                <path d="M449 218h247v133H449z" fill="#eef3ed" stroke="#dce3dc"/><path d="M467 236h210v97H467z" fill="none" stroke="#d0dbd1" stroke-dasharray="4 5"/>
-                <path d="M50 324h180v36H50z" fill="#e8efea" stroke="#cfdad0"/><path d="M62 332h155" stroke="#ccd7cd" stroke-width="2"/><path d="M62 342h155" stroke="#ccd7cd" stroke-width="2"/><path d="M62 352h155" stroke="#ccd7cd" stroke-width="2"/>
-                <path d="M416 45v335" stroke="#fafbf8" stroke-width="12"/><path d="M416 45v335" stroke="#d4ded6" stroke-width="1.5" stroke-dasharray="5 7"/>
-                <text x="76" y="164" class="map-room-label">EAST BAR</text><text x="304" y="139" class="map-room-label">LOUNGE</text><text x="523" y="187" class="map-room-label">NORTH TABLES</text><text x="521" y="365" class="map-room-label">MAIN FLOOR</text><text x="75" y="387" class="map-small-label">SIDE STAIRS</text>
-                <g id="map-pins"></g>
-                <g class="camera-marker" transform="translate(339 45)"><circle r="12"/><path d="M-5-3h6l2-2h4v10h-12z"/><circle cx="1" cy="0" r="2"/></g>
-              </svg>
-              <div class="map-legend"><span><i class="legend-dot legend-active"></i>Needs responder</span><span><i class="legend-dot legend-overdue"></i>Overdue</span><span><i class="legend-dot legend-resolving"></i>Being resolved</span><span><i class="legend-camera"></i>Camera 01</span></div>
-            </div>
-          </section>
-          <aside class="map-side panel"><div class="panel-heading"><div><h2>Active checks <span class="count-badge" id="map-active-count">0</span></h2><p>Tap a check to view the response.</p></div></div><div class="map-check-list" id="map-check-list"><div class="loading-state"><span class="loader"></span>Loading checks…</div></div><div class="feed-card"><div class="feed-card-top"><span class="feed-camera-icon">◉</span><span class="feed-status-tag" id="map-feed-status">CONNECTING</span></div><strong>Camera 01 · East bar</strong><span id="map-feed-detail">Checking venue signal</span><div class="feed-progress"><i id="feed-progress-bar"></i></div><small>FIXED CAMERA <span>·</span> REHEARSAL SETUP</small></div></aside>
-        </div>
-        <section class="recent-section supervisor-recent"><div class="recent-heading"><div><span class="eyebrow">CLOSED LOOP</span><h2>Recently resolved</h2></div><span class="text-link">Shared incident history</span></div><div class="recent-list" id="map-recent-list"><div class="recent-empty">Resolved checks will appear here.</div></div></section>
-        <footer class="app-footer"><span>GROUNDLINE <i>·</i> SUPERVISOR FLOOR VIEW</span><span><a href="/">Open responder queue</a></span></footer>
+      <section class="pane" id="map-pane" aria-label="Venue map">
+        <svg id="map" viewBox="0 0 760 440" role="group" aria-label="Venue map">
+          <rect x="3" y="3" width="754" height="434" rx="22" fill="none" stroke="var(--line)" stroke-width="3"/>
+          <path d="M426 3v434M426 194h331" fill="none" stroke="var(--line)" stroke-width="3"/>
+          <g id="pins"></g>
+        </svg>
+        <div id="zone-lines"></div>
+        <p class="fine">Tap a pin to open the check.</p>
       </section>
-    </main>
+    </div>
+    <footer class="feed" id="feed">Connecting…</footer>
   </div>
-  <div class="toast-region" id="toast-region" aria-live="polite"></div>
-  <script src="{{ url_for('static', filename='latency.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='latency.js') }}"></script>
   <script src="{{ url_for('static', filename='staff.js') }}" defer></script>
 </body>
 </html>

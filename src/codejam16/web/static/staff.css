@@ -89,7 +89,17 @@ button { font: inherit; color: inherit; }
 #map .pin { cursor: pointer; }
 #map .pin:focus-visible { outline: none; }
 #map .pin:focus-visible .halo { stroke-width: 4; }
-#map text { font-family: var(--font); }
+#map text { font-family: var(--font); text-anchor: middle; }
+#map .halo { fill: none; stroke: var(--line); stroke-width: 3; }
+#map .dot { fill: var(--line); }
+#map .count { fill: #fff; font-size: 20px; font-weight: 700; }
+#map .name { fill: var(--mute); font-size: 22px; font-weight: 500; }
+#map .pin.wait .dot { fill: var(--wait); }
+#map .pin.wait .halo { stroke: var(--wait); stroke-opacity: 0.35; }
+#map .pin.own .dot { fill: var(--own); }
+#map .pin.own .halo { stroke: var(--own); stroke-opacity: 0.35; }
+.zone-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 15px; padding: 6px 0; }
+.state i.idle { background: var(--line); }
 
 /* Projector laptop: Checks and Map side by side, no tabs. */
 @media (min-width: 900px) {

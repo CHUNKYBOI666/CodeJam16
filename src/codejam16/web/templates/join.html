@@ -2,35 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f5f6f3">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
   <title>Join · Groundline</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='staff.css') }}">
 </head>
-<body class="join-shell">
-  <main class="join-card">
-    <a class="brand brand-dark" href="/" aria-label="Groundline home">
-      <span class="brand-mark"><span></span><span></span><span></span></span>
-      <span>groundline</span>
-    </a>
-    <div class="join-kicker">VENUE RESPONSE TEAM</div>
-    {% if invite %}
-      <h1>You’re invited,<br><span>{{ invite.name.split(' ')[0] }}.</span></h1>
-      <p class="join-copy">Join the live welfare check workspace for tonight’s team.</p>
-      <div class="identity-preview">
-        <div class="avatar avatar-large">{{ invite.name.split(' ')[0][0] }}{{ invite.name.split(' ')[-1][0] }}</div>
-        <div><strong>{{ invite.name }}</strong><small>{{ 'Supervisor view' if invite.role == 'supervisor' else 'Responder' }}</small></div>
-        <span class="verified-dot"></span>
+<body class="join-page">
+  <main class="join">
+    <h1>Join the welfare check</h1>
+    <form method="post" action="/join">
+      <div class="field">
+        <label for="name">Your name</label>
+        <input id="name" name="name" type="text" value="{{ name }}" maxlength="40" required autofocus
+               autocomplete="off" autocapitalize="words" enterkeyhint="join">
       </div>
-      <form method="post"><button class="button button-primary button-wide" type="submit">Join workspace <span aria-hidden="true">→</span></button></form>
-      <p class="join-footnote">Your assignment stays with you when you refresh or reconnect.</p>
-    {% else %}
-      <h1>Join your<br><span>response team.</span></h1>
-      <p class="join-copy">Open the invitation link your supervisor shared to access the workspace.</p>
-      {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
-      <div class="join-hint">This workspace is available to invited venue staff only.</div>
-    {% endif %}
+      {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+      <button class="btn" type="submit">Join</button>
+    </form>
+    <p class="fine">This phone stays {{ name or "the name you type" }}. Another person needs their own phone.</p>
   </main>
-  <div class="join-corner">A calmer way to respond.</div>
 </body>
 </html>
