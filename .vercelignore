@@ -1,0 +1,16 @@
+.env*
+**/.env*
+local/
+clips/
+**/*.pt
+**/node_modules/
+frontend/dist/
+backend/
+vision/
+tests/
+tools/
+fixtures/
+docs/
+.venv/
+.git/
+supabase/

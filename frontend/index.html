@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#f7f6f1">
+  <title>Welfare checks</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <span class="brand"><span class="brand-mark" aria-hidden="true">+</span> Welfare checks</span>
+      <div class="identity" id="identity" hidden>
+        <span id="viewer"></span>
+        <button class="text-button" id="rename" type="button">Change name</button>
+      </div>
+    </div>
+  </header>
+  <main class="shell">
+    <section class="join" id="join">
+      <h1 id="join-title">Join the welfare check</h1>
+      <form id="join-form">
+        <label for="name">Your name</label>
+        <input id="name" name="name" maxlength="40" autocomplete="given-name" required>
+        <div class="actions">
+          <button id="join-button" type="submit" class="primary" disabled>Join</button>
+          <button id="cancel-rename" class="text-button" type="button" hidden>Cancel</button>
+        </div>
+        <p id="join-feedback" role="status">Connecting…</p>
+      </form>
+    </section>
+    <div id="room" hidden>
+      <section id="banner" class="banner" data-tone="quiet" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <h1 id="banner-text">All quiet</h1>
+      </section>
+      <p id="connection" role="status" class="connection" hidden>Reconnecting…</p>
+      <section class="check-section" aria-labelledby="checks-title">
+        <div class="section-head"><h2 id="checks-title">Checks</h2><span id="check-count"></span></div>
+        <p id="action-feedback" role="status" class="feedback" hidden></p>
+        <div id="checks"></div>
+        <details id="closed" hidden>
+          <summary>Closed <span id="closed-count"></span></summary>
+          <div id="closed-list"></div>
+        </details>
+      </section>
+      <section class="meta-section" aria-labelledby="camera-title">
+        <div class="section-head"><h2 id="camera-title">Camera</h2><span id="camera">Camera offline</span></div>
+        <p id="latency" class="muted" hidden></p>
+      </section>
+      <section class="meta-section" aria-labelledby="here-title">
+        <div class="section-head"><h2 id="here-title">Here now</h2><span id="here-count">0</span></div>
+        <ul id="people" class="people"></ul>
+      </section>
+      <section class="meta-section share" aria-labelledby="share-title">
+        <div>
+          <h2 id="share-title">Bring someone in</h2>
+          <a id="invite" hidden></a>
+        </div>
+        <canvas id="qr" aria-label="Join link QR code" role="img" hidden></canvas>
+      </section>
+    </div>
+  </main>
+  <dialog id="takeover" aria-labelledby="takeover-title">
+    <div class="alert-content">
+      <p class="alert-kicker"><span class="status-dot" aria-hidden="true"></span> Needs a responder</p>
+      <h2 id="takeover-title">Possible person down</h2>
+      <p class="alert-place" id="takeover-place"></p>
+      <p class="alert-age" id="takeover-age"></p>
+      <p class="alert-age" id="takeover-source" hidden></p>
+      <div class="alert-actions">
+        <button type="button" class="primary" id="takeover-accept" autofocus>Accept</button>
+        <button type="button" class="text-button" id="takeover-dismiss">Not now</button>
+      </div>
+    </div>
+  </dialog>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
