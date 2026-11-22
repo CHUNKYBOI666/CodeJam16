@@ -40,7 +40,7 @@ UPRIGHT_MIN_HIP_KNEE_RATIO = 0.3
 OTHER_PERSON_MIN_CONF = 0.5
 
 # Alert event (fields match fixtures/person-down.json).
-ALERT_SIGNAL = "possible_person_down"  # CLAUDE.md; the synthetic fixture says "person_down"
+ALERT_SIGNAL = "possible_person_down"  # same as fixtures/person-down.json
 CAMERA_ID = "demo-camera"
 ZONE_ID = "demo-area"
 

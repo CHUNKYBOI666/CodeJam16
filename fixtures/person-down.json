@@ -1,6 +1,6 @@
 {
   "episode_id": "fixture-person-down-001",
-  "signal": "person_down",
+  "signal": "possible_person_down",
   "camera_id": "demo-camera",
   "zone_id": "demo-area",
   "detected_at": "2026-01-01T00:00:00Z",

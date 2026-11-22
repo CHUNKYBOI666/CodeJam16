@@ -8,7 +8,7 @@ See the [implementation handoff](docs/implementation-handoff.md) for branch owne
 | --- | --- | --- |
 | `vision/` | Capture + person-down detector: camera/clip capture, pose model, posture rule, calibration, overlay, clip evaluation | David |
 | `tests/vision/` | Capture, detector and calibration tests | David |
-| `src/codejam16/web/`, `src/codejam16/store.py` | Flask + SQLite staff web app (responder queue, supervisor map) | Teammate |
+| `backend/`, `frontend/` | Staff web app: Flask + SQLite backend, staff screens (responder queue, supervisor map) | Teammate |
 
 ## Setup (Python 3.12)
 

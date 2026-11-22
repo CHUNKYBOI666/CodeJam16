@@ -20,7 +20,7 @@ The full design is in `docs/designs/live-venue-welfare-checks.md`; this file ove
 
 ## Layout and ownership
 - `vision/` = capture + detector (David's). `capture.py` (frames + failures), `detector.py` (pure posture rule + state machine), `pose.py` (model), `calibration.py`, `run.py` (overlay), `eval_clips.py`, `capture_probe.py`. Tests: `tests/vision/` (`test_capture.py`, `test_detector.py`, `test_calibration.py`).
-- Staff web app = teammate: `src/codejam16/web/`, `src/codejam16/store.py`, staff workflow tests. Don't edit it from `vision/` work; the boundary is the `create_check(...)` call below.
+- Staff web app = teammate: `backend/` (Flask + SQLite) and `frontend/` (staff screens), plus staff workflow tests. Don't edit it from `vision/` work; the boundary is the `create_check(...)` call below.
 - There is no other capture module; `src/codejam16/capture.py` was folded into `vision/capture.py`.
 
 ## Stack
