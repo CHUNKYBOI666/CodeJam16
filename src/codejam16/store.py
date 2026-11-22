@@ -21,6 +21,12 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def presentation(signal):
+    if signal == "possible_retching":
+        return "Guest may need assistance", "Possible retching motion", "Assistance provided"
+    return "Possible person down", "Possible person down detected", "Confirmed person down"
+
+
 class IncidentStore:
     def __init__(self, path: str, overdue_seconds: int = 300):
         self.path = path
@@ -155,7 +161,7 @@ class IncidentStore:
                         event.get("camera_id", "demo-camera"), event.get("zone_id", "east-bar"),
                         event.get("zone_name", "East bar"), event.get("landmark", "Beside the side stairs"),
                         event.get("source", "live"), detected_at))
-            self._history(db, incident_id, "created", "camera", "Camera", "Possible person down")
+            self._history(db, incident_id, "created", "camera", "Camera", presentation(event.get("signal"))[1])
             db.commit()
         return self.get_incident(incident_id)
 
@@ -192,7 +198,7 @@ class IncidentStore:
                            (incident_id, actor["id"]))
                 status, event = "arrived", "arrived"
             else:
-                allowed = {"Confirmed person down", "False alarm", "Couldn't verify"}
+                allowed = {presentation(row["signal"])[2], "False alarm", "Couldn't verify"}
                 if outcome not in allowed:
                     db.rollback()
                     return False, "Choose a resolution outcome", dict(row)
@@ -219,6 +225,9 @@ class IncidentStore:
                 "SELECT * FROM incidents WHERE status='resolved' ORDER BY resolved_at DESC LIMIT 8").fetchall()]
             history = [dict(row) for row in db.execute(
                 "SELECT incident_id, event, actor_id, actor_name, note, created_at FROM history ORDER BY id DESC LIMIT 40").fetchall()]
+        for item in incidents + recent:
+            item["title"], item["observation"], outcome = presentation(item["signal"])
+            item["outcomes"] = [outcome, "False alarm", "Couldn't verify"]
         for item in incidents:
             try:
                 age = (now - datetime.fromisoformat(item["detected_at"].replace("Z", "+00:00"))).total_seconds()

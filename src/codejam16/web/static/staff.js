@@ -28,7 +28,7 @@
       const link = document.createElement('a');
       link.href = '/?check=' + encodeURIComponent(item.id);
       link.dataset.id = item.id;
-      link.innerHTML = `<small>NEW ALERT${item.source === 'rehearsal' ? ' · SAMPLE' : ''}</small><strong>Possible person down</strong><span>${esc(item.zone_name)} · ${esc(item.landmark)} →</span>`;
+      link.innerHTML = `<small>NEW ALERT${item.source === 'replay' ? ' · REPLAY' : item.source === 'rehearsal' ? ' · SAMPLE' : ''}</small><strong>${esc(item.title)}</strong><span>${esc(item.zone_name)} · ${esc(item.landmark)} →</span>`;
       link.onclick = (event) => { event.preventDefault(); link.remove(); selectCheck(item.id); };
       alerts.prepend(link);
     }
@@ -176,7 +176,7 @@
     checkList.innerHTML = list.map((check) => `
       <article class="check-row${selectedId === check.id ? ' selected' : ''}" data-id="${esc(check.id)}" tabindex="0" role="button" aria-label="Open ${esc(check.zone_name)} check">
         <div class="signal-icon">${markerIcon()}</div>
-        <div class="check-copy"><div class="check-title-line"><span class="status-dot ${esc(check.status)}"></span><span class="check-title">Possible person down</span>${check.source === 'rehearsal' ? '<span class="sample-chip">SAMPLE</span>' : ''}${check.overdue ? '<span class="overdue-chip">Overdue</span>' : ''}</div>
+        <div class="check-copy"><div class="check-title-line"><span class="status-dot ${esc(check.status)}"></span><span class="check-title">${esc(check.title)}</span>${check.source === 'replay' ? '<span class="sample-chip">REPLAY</span>' : check.source === 'rehearsal' ? '<span class="sample-chip">SAMPLE</span>' : ''}${check.overdue ? '<span class="overdue-chip">Overdue</span>' : ''}</div>
           <div class="check-subline"><span>${esc(check.zone_name)}</span><span class="sep">·</span><span>${esc(check.landmark)}</span></div></div>
         ${role === 'responder' ? locationMap(check) : ''}<div class="check-trailing"><span class="time-ago">${esc(elapsed(check.detected_at))}</span><span class="row-owner">${esc(check.owner_name || statusLabel(check.status))}</span></div><span class="row-arrow">›</span>
       </article>`).join('');
@@ -192,9 +192,9 @@
 
   function renderTimeline(check) {
     const entries = checkHistory(check);
-    if (!entries.length) return '<div class="timeline-item"><span class="timeline-marker"></span><div class="timeline-copy"><strong>Possible person down detected</strong><small>Camera 01 · Automated observation</small></div><span class="timeline-time">' + esc(date(check.detected_at)) + '</span></div>';
+    if (!entries.length) return '<div class="timeline-item"><span class="timeline-marker"></span><div class="timeline-copy"><strong>'+esc(check.observation)+'</strong><small>Camera 01 · Automated observation</small></div><span class="timeline-time">' + esc(date(check.detected_at)) + '</span></div>';
     return entries.map((event) => {
-      const label = ({ created: 'Possible person down detected', accepted: 'Check accepted', arrived: 'Responder arrived', resolved: event.note || 'Check resolved' })[event.event] || event.event;
+      const label = ({ created: check.observation, accepted: 'Check accepted', arrived: 'Responder arrived', resolved: event.note || 'Check resolved' })[event.event] || event.event;
       const descriptor = event.actor_id === 'camera' ? 'Camera 01 · Automated observation' : event.actor_name;
       return `<div class="timeline-item"><span class="timeline-marker"></span><div class="timeline-copy"><strong>${esc(label)}</strong><small>${esc(descriptor)}</small></div><span class="timeline-time">${esc(date(event.created_at))}</span></div>`;
     }).join('');
@@ -206,7 +206,7 @@
     if (check.status === 'needs_responder') return `<button class="button button-primary" data-action="accept">Accept this check <span>→</span></button><div class="action-hint">Accepting assigns this check to you and clears the waiting flag.</div>`;
     if (check.owner_id !== me.id) return `<div class="not-owner-note">${esc(check.owner_name || 'A teammate')} owns this check. Only the assigned responder can update it.</div>`;
     if (check.status === 'accepted') return '<button class="button button-primary" data-action="arrive">I’ve arrived <span>→</span></button><div class="action-hint">Your team will see when you reach the location.</div>';
-    if (check.status === 'arrived') return `<div class="detail-section-title">RESOLVE THIS CHECK</div><button class="button button-secondary" data-outcome="Confirmed person down">Confirmed person down</button><button class="button button-quiet" data-outcome="False alarm">False alarm</button><button class="button button-quiet" data-outcome="Couldn't verify">Couldn’t verify</button><div class="action-hint">Your outcome is saved to the shared history.</div>`;
+    if (check.status === 'arrived') return `<div class="detail-section-title">RESOLVE THIS CHECK</div>${check.outcomes.map((outcome, index) => `<button class="button ${index === 0 ? 'button-secondary' : 'button-quiet'}" data-outcome="${esc(outcome)}">${esc(outcome)}</button>`).join('')}<div class="action-hint">Your outcome is saved to the shared history.</div>`;
     return '';
   }
 
@@ -221,7 +221,7 @@
     const status = statusLabel(check.status);
     detailPanel.classList.toggle('mobile-open', role === 'responder' || window.matchMedia('(max-width: 640px)').matches);
     if (detailPanel.dataset.checkId !== check.id) {
-      const hasClip = check.source === 'rehearsal' && ['east-bar', 'main-floor'].includes(check.zone_id);
+      const hasClip = check.signal === 'person_down' && check.source === 'rehearsal' && ['east-bar', 'main-floor'].includes(check.zone_id);
       const clip = '/static/rehearsal/' + encodeURIComponent(check.zone_id);
       detailPanel.innerHTML = `<div class="detail-content">
         <div class="detail-heading-block"></div>
@@ -232,11 +232,11 @@
       detailPanel.dataset.checkId = check.id;
     }
     detailPanel.querySelector('.detail-heading-block').innerHTML = `
-        <div class="detail-topline"><span>CHECK · ${esc(check.id.slice(0, 8).toUpperCase())}${check.source === 'rehearsal' ? ' · REHEARSAL SAMPLE' : ''}</span><button class="detail-close" aria-label="Close details">×</button></div>
-        <div class="detail-title"><div class="signal-icon">${markerIcon()}</div><div><h2>Possible person down</h2><p>${esc(status)}${check.overdue ? ' · Overdue' : ''}</p></div></div>
+        <div class="detail-topline"><span>CHECK · ${esc(check.id.slice(0, 8).toUpperCase())}${check.source === 'replay' ? ' · RECORDED REPLAY' : check.source === 'rehearsal' ? ' · REHEARSAL SAMPLE' : ''}</span><button class="detail-close" aria-label="Close details">×</button></div>
+        <div class="detail-title"><div class="signal-icon">${markerIcon()}</div><div><h2>${esc(check.title)}</h2><p>${esc(status)}${check.overdue ? ' · Overdue' : ''}</p></div></div>
       `;
     detailPanel.querySelector('.detail-fields').innerHTML = `
-        <div class="detail-alert"><span class="alert-mark">i</span><span>The camera noticed someone may be down. Please check in and decide what support is needed.</span></div>
+        <div class="detail-alert"><span class="alert-mark">i</span><span>${esc(check.observation)}. Please check in and decide what support is needed.</span></div>
         <div class="detail-section check-location"><div class="detail-section-title">LOCATION</div>${role === 'responder' ? locationMap(check) : ''}<div class="location-line"><div class="location-icon">${markerIcon()}</div><div class="location-copy"><strong>${esc(check.zone_name)}</strong><span>${esc(check.landmark)}</span></div></div></div>
         <div class="detail-section"><div class="detail-facts"><div><span class="fact-label">DETECTED</span><span class="fact-value">${esc(date(check.detected_at))} <span style="color:#9aa49d;font-weight:400">· ${esc(elapsed(check.detected_at))}</span></span></div><div><span class="fact-label">STATUS</span><span class="fact-value">${esc(status)}</span></div></div></div>
         <div class="detail-section"><div class="detail-section-title">ASSIGNED TO</div><div class="owner-row">${check.owner_name ? `<span class="avatar">${esc(initials(check.owner_name))}</span><span>${esc(check.owner_name)}</span>` : '<span class="fact-value">Waiting for someone to help</span>'}</div></div>
@@ -253,7 +253,7 @@
     if (!list.length) {
       host.innerHTML = '<div class="empty-state" style="min-height:125px"><strong>All clear</strong><p>No active checks across the venue.</p></div>';
     } else {
-      host.innerHTML = list.map((check) => `<button type="button" class="map-check-row" data-id="${esc(check.id)}"><span class="map-row-indicator ${esc(check.status)}"></span><div class="map-row-copy"><strong>Possible person down · ${esc(check.zone_name)}${check.source === 'rehearsal' ? ' · Sample' : ''}</strong><span>${esc(check.owner_name ? check.owner_name + ' · ' + (check.status === 'accepted' ? 'On the way' : statusLabel(check.status)) : 'Awaiting responder')}${check.overdue ? ' · Overdue' : ''}</span></div><span class="map-row-time">${esc(elapsed(check.detected_at))}</span></button>`).join('');
+      host.innerHTML = list.map((check) => `<button type="button" class="map-check-row" data-id="${esc(check.id)}"><span class="map-row-indicator ${esc(check.status)}"></span><div class="map-row-copy"><strong>${esc(check.title)} · ${esc(check.zone_name)}${check.source === 'replay' ? ' · Replay' : check.source === 'rehearsal' ? ' · Sample' : ''}</strong><span>${esc(check.owner_name ? check.owner_name + ' · ' + (check.status === 'accepted' ? 'On the way' : statusLabel(check.status)) : 'Awaiting responder')}${check.overdue ? ' · Overdue' : ''}</span></div><span class="map-row-time">${esc(elapsed(check.detected_at))}</span></button>`).join('');
       host.querySelectorAll('.map-check-row').forEach((row) => row.addEventListener('click', () => { setView('queue'); selectCheck(row.dataset.id); }));
     }
     document.querySelectorAll('.map-pin-group').forEach((pin) => {
@@ -282,7 +282,7 @@
 
   function renderRecent() {
     const recent = snapshot?.recent || [];
-    const markup = recent.length ? recent.map((check) => `<article class="recent-card"><span class="resolved-check">✓</span><div class="recent-card-copy"><strong>Possible person down · ${esc(check.zone_name)}${check.source === 'rehearsal' ? ' · Sample' : ''}</strong><span>Resolved by ${esc(check.owner_name || 'response team')} · ${esc(date(check.resolved_at))}</span></div><span class="outcome-tag">${esc(check.outcome)}</span></article>`).join('') : '<div class="recent-empty">Resolved checks will appear here.</div>';
+    const markup = recent.length ? recent.map((check) => `<article class="recent-card"><span class="resolved-check">✓</span><div class="recent-card-copy"><strong>${esc(check.title)} · ${esc(check.zone_name)}${check.source === 'replay' ? ' · Replay' : check.source === 'rehearsal' ? ' · Sample' : ''}</strong><span>Resolved by ${esc(check.owner_name || 'response team')} · ${esc(date(check.resolved_at))}</span></div><span class="outcome-tag">${esc(check.outcome)}</span></article>`).join('') : '<div class="recent-empty">Resolved checks will appear here.</div>';
     document.getElementById('recent-list').innerHTML = markup;
     document.getElementById('map-recent-list').innerHTML = markup;
   }

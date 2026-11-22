@@ -87,3 +87,7 @@ can open a replay. A stuck native reader may require restarting the process
 before reopening the camera. At integration, the caller shows the camera as
 offline, starts labeled replay with fresh detector timing if no check exists
 yet, or lets staff finish an existing check.
+
+## Experimental nausea/vomiting checks
+
+See the [model setup, live camera and recorded replay instructions](docs/illness-detector.md).
