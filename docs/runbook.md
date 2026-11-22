@@ -1,0 +1,168 @@
+# Spotter runbook
+
+Step-by-step operating notes for the demo. The [README](../README.md) has the short version. Run commands from the repository root unless a step says otherwise.
+
+Contents: [Pose overlay and calibration](#pose-overlay-and-calibration) · [Capture probe on macOS](#capture-probe-on-macos) · [Tests and clip evaluation](#tests-and-clip-evaluation) · [Develop and test the hosted app locally](#develop-and-test-the-hosted-app-locally) · [Provision and rehearse the hosted demo](#provision-and-rehearse-the-hosted-demo) · [Run the live iPhone-to-Spotter pipeline](#run-the-live-iphone-to-spotter-pipeline)
+
+## Setup (Python 3.12)
+
+```bash
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
+```
+
+## Pose overlay and calibration
+
+```bash
+.venv/bin/python vision/run.py --source 0                     # use the index verified by the capture probe
+.venv/bin/python vision/run.py --source clips/lying_down_twice.mp4   # recording (paced at real time)
+```
+
+Calibrate the floor region once per camera placement (click corners on the first frame, Enter to save to `local/calibration.json`):
+
+```bash
+.venv/bin/python vision/run.py --source clips/lying_down_twice.mp4 --calibrate
+```
+
+`vision/run.py` uses camera index `0` when `--source` is omitted. Camera indexes can change when
+the phone connects. Verify the image and pass the correct index explicitly for the demo.
+
+Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dropping), `--device cpu`,
+`--constant-fps 30` (files whose decoder reports no usable media timestamps), `--stall-timeout 5`.
+Weights download to `local/weights/` on first run. `clips/` and `local/` are git-ignored.
+
+Alerts are printed to stdout as one JSON object per line, with the fields of
+`fixtures/person-down.json`; logs go to stderr. Set the ids with `--camera-id` and `--zone-id`:
+
+```bash
+.venv/bin/python vision/run.py --source 0 --zone-id east-bar > local/alerts.jsonl
+```
+
+## Capture probe on macOS
+
+Checks that a camera or clip delivers changing frames, without running the pose model:
+
+```bash
+.venv/bin/python vision/capture_probe.py --source clips/lying_down_twice.mp4 --frames 30
+.venv/bin/python vision/capture_probe.py --source 0 --frames 120
+.venv/bin/python vision/capture_probe.py --source 0 --frames 30 --snapshot local/kitchen-frame.png
+```
+
+Use a staged local clip with movement. If the decoder does not expose increasing
+media timestamps, re-export the clip or pass its verified constant frame rate,
+for example `--constant-fps 30`. Use the override only for constant frame rate
+footage. A failed decode can look like ordinary end of file when the backend
+does not report the expected frame count.
+
+For the camera probe, grant camera access if macOS prompts, or check **System
+Settings → Privacy & Security → Camera** for the app that launches Python.
+Follow [Apple's Continuity Camera setup](https://support.apple.com/en-us/102546).
+Keep the iPhone near the Mac with Wi-Fi and Bluetooth enabled, Personal Hotspot
+off, and the Mac's Internet Sharing off. Lock and mount the iPhone. Start with
+it unplugged. Try camera index 0, then 1 and other available indexes as needed.
+Move an object in only the phone's field of view. The probe measures pixel
+changes, so sensor noise alone can also produce `changed=yes`. To identify the
+iPhone index, aim the two cameras at separate areas and pause the iPhone mid-probe
+to confirm which index loses its feed. Use a longer sample such as `--frames 600`
+for the interruption check.
+
+If wireless is unreliable, connect a data-capable USB cable, trust the Mac if
+prompted, and repeat the probe. Record the command, Python and OpenCV versions,
+camera index, transport, and result for each run. Keep clips in `clips/`.
+
+Capture (`vision/capture.py`) reports a startup failure if no usable frame arrives
+within five seconds. After startup, a failed read or a five-second gap ends the
+live source (`--stall-timeout` changes the limit); `vision/run.py` then exits with code 2.
+If the native read does not return, the caller still receives the timeout and
+can open a replay. A stuck native reader may require restarting the process
+before reopening the camera. At integration, the caller shows the camera as
+offline, starts labeled replay with fresh detector timing if no check exists
+yet, or lets staff finish an existing check.
+
+## Tests and clip evaluation
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/python vision/eval_clips.py    # every clip in clips/: alerts and down->alert time
+```
+
+## Develop and test the hosted app locally
+
+Use Node 24, Python 3.12, Docker, the Supabase CLI and `psql`.
+
+```sh
+cd backend
+supabase start
+supabase db reset
+supabase test db
+cd ..
+node backend/tests/race.mjs
+npm ci --prefix frontend
+npm test --prefix frontend
+```
+
+For the calibration editor browser test, run `npm exec --prefix frontend -- playwright install chromium` and `npm run test:browser --prefix frontend`.
+
+Copy `frontend/.env.example` to `frontend/.env.local`. Set the local Supabase URL and the **publishable** key from the CLI's local status. Run `npm run dev --prefix frontend` and open `http://localhost:5173/?room=codejam-local`. Use two independent browser profiles to exercise simultaneous claims. To verify the packaged frontend, run `npm run build --prefix frontend`.
+
+Set `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in the Mac's shell using the local or hosted project's settings. Then run the publisher or the mock from the repo root.
+
+```sh
+.venv/bin/python tools/mock_check.py
+.venv/bin/python tools/mock_check.py --episode-id demo-dedupe
+.venv/bin/python tools/mock_check.py --episode-id demo-dedupe
+.venv/bin/python vision/run.py --source local/rehearsal.mp4 --publish
+.venv/bin/python vision/run.py --source 0 --publish
+.venv/bin/python -m pytest -q
+```
+
+## Provision and rehearse the hosted demo
+
+1. Apply the migrations from `backend/` with `supabase db push --remote` on the linked demo project. Enable Anonymous Sign-Ins and use private Realtime channels. Set Auth Site URL to the production Vercel origin. Set the anonymous sign-in rate limit for the expected arrival burst on the shared venue IP. The local seed is for development.
+2. Set a generated room code in `app_private.app_settings` using the trusted SQL editor. Upsert the `room_code` row to rotate it. Existing joined sessions retain their assignments. Start from a fresh browser after rotation to verify that the old QR fails.
+3. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `VITE_SITE_URL` in the linked Vercel project. Run `vercel deploy --prod` from the repository root. Export the publisher secret only on the Mac. The app's **Bring someone in** section shows the printable QR and join link.
+4. Run a mock, then test a staged replay and the live iPhone camera. Measure time to join on Wi-Fi and cellular, database creation to first display, and detector confirmation to first display. Verify sound after joining, simultaneous claim, refresh, rename, all three outcomes, and reconnection. A refreshed mobile browser may require another tap to enable audio.
+5. If capture fails before creating a check, restart vision with the labeled staged replay. If capture drops after a check exists, continue that check in the room. If internet service fails, use the Flask build from `feat/join-by-name` on a controlled LAN and two independent browser profiles.
+
+Record results in [the rehearsal log](hosted-rehearsal.md).
+
+## Run the live iPhone-to-Spotter pipeline
+
+Use a Mac with Python 3.12, the iPhone, the team's Spotter room QR, and the Supabase server key for the demo project. The hosted viewer and database are already deployed. Run these commands from the repository root.
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+mkdir -p local
+```
+
+**Calibrate the live view.** Connect the iPhone over USB‑C and lock it. Quit any earlier detector window with **Q**. Mount the phone at the intended angle so the four floor points are visible. Use the camera image to verify the index. If source `0` shows the FaceTime camera, quit, change the first line below to `camera_index=1`, and rerun.
+
+```bash
+camera_index=0
+.venv/bin/python -u vision/run.py --source "$camera_index" --calibration-preview 5199
+```
+
+Open the printed **Live floor editor** URL on the same Mac. Once the view is stable, click **Freeze frame**. Mark A–D clockwise from the upper-left on four floor-level points that form a 3:2 rectangle. Click the floor to preview the pin, then click **Export calibration**. Stop the calibration run with **Q** in the pose window or **Ctrl+C** in the terminal. Copy the new export, using its actual filename if the browser numbered it.
+
+```bash
+cp ~/Downloads/kitchen-minimap-setup.json local/kitchen-minimap-setup.json
+```
+
+**Run the publishing detector.** Use the hosted project's Supabase server key in the Mac terminal. The prompt hides what you paste.
+
+```bash
+export SUPABASE_URL=https://gbbbvzzeshuafsimtdly.supabase.co
+printf 'Supabase server key: '
+IFS= read -rs SUPABASE_SECRET_KEY
+printf '\n'
+export SUPABASE_SECRET_KEY
+
+.venv/bin/python -u vision/run.py --source "$camera_index" --camera-id kitchen-iphone --zone kitchen \
+  --location-calibration local/kitchen-minimap-setup.json --publish
+```
+
+Verify the image and A–D outline in **CodeJam16 pose**, then press **M** to enable minimap dots for that session. Press **U** if the phone moves. Capture and export again after a framing change. Use **Q** or **Ctrl+C** to stop the detector.
+
+**Receive and verify the alert.** Scan the team's QR on a phone, join Spotter, and keep **Checks** open. Stage one down episode, stand clearly upright for at least two continuous seconds, and stage another at a different spot. A mapped alert shows a red dot on the minimap. Claim it and refresh to verify that the dot stays with the check. An alert without a valid pin shows the place label.
+
+If you cannot open the live editor, save a frame using [the capture probe](#capture-probe-on-macos) and open `tools/kitchen-calibration.html` with `open tools/kitchen-calibration.html`. Load the saved image, set the verified camera index, and follow the same A–D and export steps.
