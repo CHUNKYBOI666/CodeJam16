@@ -434,9 +434,9 @@ def test_alert_event_matches_fixture_fields():
     c = Clock(make()).hold(LYING, 3)
     ev = alert_event(
         c.alerts[0],
-        camera_id="demo-camera",
-        zone_id="demo-area",
-        source="replay",
+        camera_id=fixture["camera_id"],  # read from the fixture so a zone rename there doesn't break this
+        zone_id=fixture["zone_id"],
+        source=fixture["source"],
         detected_at=datetime(2026, 1, 1, 5, 0, 0, 123000, tzinfo=timezone(timedelta(hours=5))),
     )
     assert list(ev) == list(fixture)
