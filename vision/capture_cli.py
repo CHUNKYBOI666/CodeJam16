@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 
-from .capture import CaptureError, open_camera, open_replay
+from capture import CaptureError, open_camera, open_replay
 
 
 def main(argv=None):

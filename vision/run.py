@@ -1,9 +1,9 @@
 """Live person-down detector with overlay: skeleton, torso angle, floor region, timers, FPS.
 
-    python cv/run.py --source 0                     # webcam index
-    python cv/run.py --source clips/lie_down.mp4    # video file, paced at real time
-    python cv/run.py --source clips/lie_down.mp4 --no-show --save local/out.mp4
-    python cv/run.py --source 0 --calibrate         # click the floor polygon on the first frame
+    python vision/run.py --source 0                     # webcam index
+    python vision/run.py --source clips/lie_down.mp4    # video file, paced at real time
+    python vision/run.py --source clips/lie_down.mp4 --no-show --save local/out.mp4
+    python vision/run.py --source 0 --calibrate         # click the floor polygon on the first frame
 
 The capture thread keeps only the newest frame; inference always runs on that one and
 stale frames are dropped (counted on the overlay). Video files are paced at their own
