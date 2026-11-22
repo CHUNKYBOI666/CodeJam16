@@ -224,7 +224,8 @@ def parse_source(raw: str) -> int | str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--source", required=True, help="webcam index (e.g. 0) or path to a video file")
+    ap.add_argument("--source", default=config.CAMERA_SOURCE,
+                    help=f"camera index or video path (default: {config.CAMERA_SOURCE}, kitchen phone)")
     ap.add_argument("--calibrate", action="store_true", help="click the floor polygon on the first frame and exit")
     ap.add_argument("--calibration", default=str(REPO_ROOT / config.CALIBRATION_PATH), help="calibration json path")
     ap.add_argument("--camera-id", default=config.CAMERA_ID, help="camera id reported with alerts")

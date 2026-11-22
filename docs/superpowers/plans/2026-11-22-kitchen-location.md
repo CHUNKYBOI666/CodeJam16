@@ -14,6 +14,7 @@
 
 - Start from merged hosted `main` commit `acdefe3`; this plan lives in the isolated `codex/kitchen-location-plan` worktree.
 - The camera remains fixed for filming. Calibration is saved locally and reused at subsequent launches.
+- Camera source `0` is the mounted phone for this demo and is the default for live detection and calibration; explicit `--source` still selects a clip or another camera.
 - Only floor-plane correspondences may enter the homography. A counter-top corner is not a floor point.
 - Keep frames, calibration data, weights, reference stills and recordings out of Git; `local/` is already ignored.
 - The browser receives layout geometry and event metadata only. The Python publisher alone uses the Supabase secret key.
@@ -58,7 +59,7 @@
 
 **Files:** Extend `vision/location.py`; create `vision/calibrate_map.py`; extend `tests/vision/test_location.py`.
 
-**Interfaces:** `fit_homography(image_points_norm: Sequence[Point], floor_points_m: Sequence[Point]) -> CalibrationFit` returns a 3×3 matrix and error metrics. `save_map_calibration(path, camera_id, layout_version, source_size, image_points_norm, floor_points_m, matrix) -> None`; `load_map_calibration(path, camera_id, layout_version, frame_size) -> MapCalibration | None`. The CLI accepts `--source`, `--camera-id`, `--layout`, and `--output` (default `local/kitchen-calibration.json`).
+**Interfaces:** `fit_homography(image_points_norm: Sequence[Point], floor_points_m: Sequence[Point]) -> CalibrationFit` returns a 3×3 matrix and error metrics. `save_map_calibration(path, camera_id, layout_version, source_size, image_points_norm, floor_points_m, matrix) -> None`; `load_map_calibration(path, camera_id, layout_version, frame_size) -> MapCalibration | None`. The CLI accepts `--source` (default `0`, the mounted phone), `--camera-id`, `--layout`, and `--output` (default `local/kitchen-calibration.json`).
 
 - [ ] **Step 1: Write failing geometry tests.** A known perspective transform maps four floor corners to their metre coordinates and maps an interior point within 0.05 m. A fifth, held-out landmark checks the result. Reject fewer than five correspondences, collinear points, a singular matrix, a held-out error over 0.6 m, wrong camera ID, wrong layout version and materially changed aspect ratio. Accept the same image at half resolution with unchanged aspect ratio.
 - [ ] **Step 2: Run the targeted geometry tests and confirm failure.**
@@ -102,7 +103,7 @@
 
 **Files:** Modify `README.md` and `docs/hosted-rehearsal.md`; adjust implementation/tests only for failures observed in this rehearsal.
 
-- [ ] **Step 1: Add exact operator commands and setup steps.** Document mounting the camera, drawing/measuring the top-down layout, choosing five floor-level landmarks, running the existing floor-region calibration, running `vision/calibrate_map.py`, checking the saved reprojection error, and launching `vision/run.py --source <camera-index> --publish --map-calibration local/kitchen-calibration.json`.
+- [ ] **Step 1: Add exact operator commands and setup steps.** Document mounting the phone as camera index `0`, drawing/measuring the top-down layout, choosing five floor-level landmarks, running the existing floor-region calibration, running `vision/calibrate_map.py`, checking the saved reprojection error, and launching `vision/run.py --source 0 --publish --map-calibration local/kitchen-calibration.json`.
 - [ ] **Step 2: From the final camera position, mark two known floor spots on the kitchen layout and stage a down event at each.** Keep the camera mounted. Stand clearly upright for at least 2 continuous seconds between episodes. Compare both pins to measured spots; target within approximately 1 m and the correct side of the counter. If the pose or camera view fails, adjust the setup and recalibrate before judging the math.
 - [ ] **Step 3: Verify the hosted path on two joined phones.** Confirm the two checks keep the same pins and labels after refresh, claim, arrival and resolution. Confirm the old mock command still creates a text-only check. Record screenshot/short clip and measured errors in `docs/hosted-rehearsal.md` without committing raw camera media or credentials.
 - [ ] **Step 4: Run final gates.** `python3.12 -m pytest -q`, `npm test --prefix frontend`, `npm run build --prefix frontend`, `cd backend && supabase test db`, `node backend/tests/race.mjs`, and `git diff --check`. Only then prepare a PR with what was verified and a screenshot or short recording.

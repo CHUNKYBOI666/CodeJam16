@@ -19,7 +19,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 ## Pose overlay
 
 ```bash
-.venv/bin/python vision/run.py --source 0                    # webcam
+.venv/bin/python vision/run.py                               # kitchen phone, camera index 0
 .venv/bin/python vision/run.py --source clips/lying_down_twice.mp4   # recording (paced at real time)
 ```
 
@@ -28,6 +28,9 @@ Calibrate the floor region once per camera placement (click corners on the first
 ```bash
 .venv/bin/python vision/run.py --source clips/lying_down_twice.mp4 --calibrate
 ```
+
+For the kitchen demo, `vision/run.py` uses camera index `0` when `--source` is omitted. The same
+default applies during floor calibration. Pass `--source` explicitly for another camera or a recording.
 
 Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dropping), `--device cpu`,
 `--constant-fps 30` (files whose decoder reports no usable media timestamps), `--stall-timeout 5`.

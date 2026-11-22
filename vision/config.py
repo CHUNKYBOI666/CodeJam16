@@ -10,6 +10,9 @@ WARMUP_PASSES = 3  # dummy inferences at the source frame size before capture st
 # Floor region calibration (polygon clicked on the first frame).
 CALIBRATION_PATH = "local/calibration.json"
 
+# The mounted phone is camera index 0 for the kitchen demo.
+CAMERA_SOURCE = "0"
+
 # COCO keypoint indices used by the torso rule.
 L_SHOULDER, R_SHOULDER = 5, 6
 L_HIP, R_HIP = 11, 12

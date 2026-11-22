@@ -32,6 +32,7 @@ OpenCV’s `findHomography` computes the projective transform and `perspectiveTr
 
 - Python 3.12 and existing pinned OpenCV/Numpy versions; static Vite frontend and hosted Supabase Postgres remain the stack.
 - Calibration is local and specific to one camera position, orientation and image crop. Different image resolutions with the same aspect ratio can rescale normalized image points; rotation or a different crop invalidates the calibration.
+- For this kitchen setup, camera source `0` is the mounted phone and is the default for detector and map calibration runs. Other sources remain selectable explicitly.
 - A bad or missing calibration produces a plain place label and a visible local warning. It must never create a misleading map pin.
 - Keep frames, reference stills, local calibration data and camera recordings out of Git. Commit only the kitchen layout geometry and tests.
 - For the filmed demo, rehearse two different floor positions with a fixed camera. In each case the pin should land within approximately 1 metre of the measured position and on the correct side of the counter. Rearm the detector with at least 2 continuous seconds of clearly upright posture between episodes. The two checks should appear on joined phones and retain their pins through refresh and claim.
