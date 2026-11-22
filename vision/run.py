@@ -37,6 +37,7 @@ from calibration import load_floor_polygon, save_calibration  # noqa: E402
 from capture import CaptureError, FrameSource  # noqa: E402
 from detector import PersonDownDetector, Posture, State, Status, alert_event  # noqa: E402
 from pose import REPO_ROOT, load_model, pick_device, people_from_result, predict, warm_up  # noqa: E402
+from publish import BackgroundPublisher, Publisher, PublishError  # noqa: E402
 
 
 # ---------------------------------------------------------------- calibration UI
@@ -233,6 +234,7 @@ def main() -> None:
     ap.add_argument("--every-frame", action="store_true", help="files only: process every frame, no dropping")
     ap.add_argument("--constant-fps", type=float, help="files only: use index/fps timestamps instead of media time")
     ap.add_argument("--stall-timeout", type=float, default=5.0, help="seconds without a camera frame = feed lost")
+    ap.add_argument("--publish", action="store_true", help="publish check and feed metadata to Supabase")
     ap.add_argument("--no-show", action="store_true", help="do not open a window")
     ap.add_argument("--save", help="write the annotated video to this path")
     ap.add_argument("--log-every", type=float, default=1.0, help="seconds between console stat lines (0 = off)")
@@ -244,6 +246,13 @@ def main() -> None:
     sys.stdout = sys.stderr
 
     source = parse_source(args.source)
+    source_kind = "live" if isinstance(source, int) else "replay"
+    publisher = None
+    if args.publish and not args.calibrate:
+        try:
+            publisher = BackgroundPublisher(Publisher.from_env())
+        except PublishError as err:
+            raise SystemExit(f"[publish] {err}") from None
     try:
         reader = FrameSource(
             source,
@@ -253,6 +262,8 @@ def main() -> None:
         )
         reader.wait_ready()
     except (CaptureError, ValueError) as err:
+        if publisher:
+            publisher.close("offline", "Camera offline", source_kind)
         raise SystemExit(f"[run] CAPTURE FAILED: {err}")
     print(f"[run] source {args.source} via {reader.backend}, {reader.width}x{reader.height}")
 
@@ -269,13 +280,18 @@ def main() -> None:
         print(f"[run] floor polygon: {len(floor)} points from {args.calibration}")
 
     device = args.device or pick_device()
-    model, model_name = load_model(args.weights)
-    t_warm = time.perf_counter()
-    warm_up(model, device, reader.width, reader.height)
+    try:
+        model, model_name = load_model(args.weights)
+        t_warm = time.perf_counter()
+        warm_up(model, device, reader.width, reader.height)
+    except Exception:
+        reader.close()
+        if publisher:
+            publisher.close("detector_unavailable", "Detector unavailable", source_kind)
+        raise
     print(f"[run] warmed up at {reader.width}x{reader.height} in {time.perf_counter() - t_warm:.1f}s")
 
     detector = PersonDownDetector(floor_polygon=floor, frame_size=(reader.width, reader.height))
-    source_kind = "replay" if reader.is_file else "live"
     reader.start()  # capture (and file pacing) begins only after the model is warm
 
     writer = None
@@ -314,6 +330,9 @@ def main() -> None:
             last_wall = now
             ms_ema = infer_ms if ms_ema is None else 0.9 * ms_ema + 0.1 * infer_ms
             processed += 1
+            if publisher:
+                label = "Rehearsal clip" if source_kind == "replay" else "Live"
+                publisher.report(source_kind, label, fps_ema or 0.0, source_kind)
 
             if status.alert:
                 alerts += 1
@@ -328,6 +347,8 @@ def main() -> None:
                 print(f"[ALERT] {a.episode_id} t={a.detected_at_ms / 1000:.2f}s "
                       f"(down since {a.down_started_ms / 1000:.2f}s, "
                       f"+{(a.detected_at_ms - a.down_started_ms) / 1000:.2f}s)")
+                if publisher:
+                    publisher.check(event)
                 try:
                     alert_out.write(json.dumps(event) + "\n")
                     alert_out.flush()
@@ -366,6 +387,8 @@ def main() -> None:
         pass
     finally:
         reader.close()
+        if publisher:
+            publisher.close("offline", "Camera offline", source_kind)
         if writer is not None:
             writer.release()
         if not args.no_show:
@@ -383,6 +406,8 @@ def main() -> None:
         raise SystemExit(2)
     if alert_pipe_closed:
         raise SystemExit(3)
+    if publisher and publisher.failed_checks:
+        raise SystemExit(4)
 
 
 if __name__ == "__main__":
