@@ -8,12 +8,19 @@ import { renderQr } from "./qr.js";
 import { cameraLabel, createStore } from "./state.js";
 
 const get = (id) => document.getElementById(id);
+const appName = document.title;
 const join = get("join");
 const form = get("join-form");
 const nameInput = get("name");
 const joinButton = get("join-button");
 const joinFeedback = get("join-feedback");
 const actionFeedback = get("action-feedback");
+const resetButton = get("reset-checks");
+const resetDialog = get("reset-dialog");
+const resetForm = get("reset-form");
+const resetCancel = get("reset-cancel");
+const resetConfirm = get("reset-confirm");
+const resetError = get("reset-error");
 const roomUrl = new URL(location.href);
 const joinCode = roomUrl.searchParams.get("room");
 if (roomUrl.searchParams.has("room")) {
@@ -32,6 +39,7 @@ let pending = false;
 let renaming = false;
 let editor = null;
 let stopSubscription;
+let resetSync;
 let activeInvite;
 let clockOffsetMs;
 let lastCheckView;
@@ -75,11 +83,14 @@ function render() {
   get("identity").hidden = !viewer || renaming;
   if (!viewer) {
     takeover(null);
-    document.title = "Welfare checks";
+    document.title = appName;
     return;
   }
   get("viewer").textContent = viewer.name;
   get("connection").hidden = online;
+  resetButton.disabled = !online || pending;
+  resetConfirm.disabled = !online || pending;
+  resetCancel.disabled = pending;
   const view = store.view();
   const open = [...view.waiting, ...view.inProgress];
   if (editor && !open.some((check) => check.id === editor && check.status === "arrived")) editor = null;
@@ -111,7 +122,7 @@ function render() {
   const names = present.map((id) => members.get(id)?.name).filter(Boolean).sort((a, b) => a.localeCompare(b));
   get("here-count").textContent = names.length;
   renderPeople(get("people"), names);
-  const alert = renaming || editor ? null : alertCandidate(view);
+  const alert = renaming || editor || resetDialog.open ? null : alertCandidate(view);
   takeover(alert, alert ? ago(alert.detected_at, now()) : "", online, pending);
   if (!renaming && !document.hidden) {
     for (const check of open) {
@@ -190,6 +201,11 @@ async function enter(person) {
       render();
       if (!online) void sync();
     },
+    checksDeleted() {
+      if (viewer?.id !== id) return;
+      clearTimeout(resetSync);
+      resetSync = setTimeout(() => void sync(), 100);
+    },
     feed(row) {
       if (viewer?.id !== id || !row.updated_at) return;
       store.invalidate();
@@ -221,6 +237,8 @@ async function enter(person) {
 function resetSession() {
   void stopSubscription?.();
   stopSubscription = undefined;
+  clearTimeout(resetSync);
+  if (resetDialog.open) resetDialog.close();
   viewer = null;
   feed = null;
   editor = null;
@@ -233,7 +251,7 @@ function resetSession() {
   get("invite").hidden = true;
   get("qr").hidden = true;
   store.applySnapshot(store.beginSnapshot(), []);
-  get("join-title").textContent = "Join the welfare check";
+  get("join-title").textContent = `Join ${appName}`;
   get("cancel-rename").hidden = true;
   joinButton.textContent = "Join";
   joinButton.disabled = !joinCode;
@@ -257,6 +275,39 @@ async function sendAction(id, action, outcome) {
     render();
   }
 }
+
+resetButton.addEventListener("click", () => {
+  if (!viewer || !online || pending) return;
+  resetError.hidden = true;
+  resetDialog.showModal();
+  render();
+});
+resetCancel.addEventListener("click", () => resetDialog.close());
+resetDialog.addEventListener("close", render);
+resetDialog.addEventListener("cancel", event => {
+  if (pending) event.preventDefault();
+});
+resetForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!viewer || !online || pending) return;
+  pending = true;
+  resetError.hidden = true;
+  feedback();
+  render();
+  try {
+    const count = await api.resetChecks();
+    editor = null;
+    await sync();
+    resetDialog.close();
+    feedback(count ? "Checks cleared." : "There were no checks to clear.");
+  } catch {
+    resetError.textContent = "Couldn’t confirm the reset. Check your connection and try again.";
+    resetError.hidden = false;
+  } finally {
+    pending = false;
+    render();
+  }
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -322,7 +373,7 @@ setInterval(() => {
   if (!viewer) return;
   render();
   const flashing = store.view().waiting.length && Math.floor(Date.now() / 1000) % 2;
-  document.title = flashing ? "Needs a responder" : "Welfare checks";
+  document.title = flashing ? `Needs a responder · ${appName}` : appName;
 }, 1000);
 
 async function start() {

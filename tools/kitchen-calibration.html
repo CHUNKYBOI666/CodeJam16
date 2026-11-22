@@ -13,6 +13,8 @@ p { margin: .45rem 0 1rem; }
 .panels { display: grid; grid-template-columns: 1.85fr 1fr; gap: 1rem; }
 section { min-width: 0; padding: 1rem; background: #fffdfa; border: 1px solid #d8d1c5; border-radius: .75rem; }
 .camera { display: block; width: 100%; border-radius: .45rem; cursor: crosshair; touch-action: manipulation; }
+.live-frame { display: block; width: 100%; height: auto; border-radius: .45rem; }
+[hidden] { display: none !important; }
 .corner { cursor: grab; touch-action: none; outline: none; }
 .corner:active { cursor: grabbing; }
 .corner:focus-visible .corner-disc { stroke: #ffd25d; stroke-width: 6; }
@@ -40,15 +42,17 @@ button:hover { background: #f3f0e9; }
 </style>
 <main>
   <h1>Kitchen minimap</h1>
-  <p>Drag A–D to adjust coverage. Click the floor to preview a location, then export the calibration for the detector.</p>
+  <p id="editor-instructions">Drag A–D to adjust coverage. Click the floor to preview a location, then export the calibration for the detector.</p>
   <div class="panels">
     <section>
-      <h2>Stable iPhone frame</h2>
+      <h2 id="frame-title">Camera frame</h2>
       <div class="setup-controls">
         <label>Camera frame <input type="file" id="camera-file" accept="image/png,image/jpeg"></label>
         <label>Saved calibration <input type="file" id="setup-file" accept=".json,application/json" disabled></label>
         <label>Camera index <input type="number" id="camera-index" min="0" step="1" value="0"></label>
+        <button type="button" id="freeze" hidden disabled>Freeze frame</button>
       </div>
+      <img id="live-frame" class="live-frame" alt="Live iPhone camera preview" hidden>
       <svg class="camera" viewBox="0 0 1200 675" aria-label="Overhead frame with the wall on the left and chair on the right">
         <image id="source-image" width="1200" height="675" />
         <polygon id="outline" fill="#116c5a" fill-opacity=".12" stroke="white" stroke-width="3" stroke-dasharray="13 9" />
@@ -151,6 +155,9 @@ const cameraIndex = document.querySelector("#camera-index");
 const exportButton = document.querySelector("#export-corners");
 const sourceImage = document.querySelector("#source-image");
 const sampleButtons = document.querySelectorAll("[data-point]");
+const freezeButton = document.querySelector("#freeze");
+const liveImage = document.querySelector("#live-frame");
+const frameTitle = document.querySelector("#frame-title");
 let dimensions = null;
 let frameRequest = 0;
 let fileUrl = null;
@@ -417,6 +424,65 @@ drawGuides();
 show(selectedPoint);
 if (location.pathname.endsWith("/stable-kitchen-minimap.html")) {
   void loadFrame("stable-iphone.png", true);
+}
+
+const previewQuery = new URLSearchParams(location.search);
+if (location.hostname === "127.0.0.1" && previewQuery.has("live")) {
+  let streaming = true;
+  let liveUrl = null;
+  document.querySelector("#editor-instructions").textContent =
+    "Adjust the iPhone while watching the live image. Freeze a frame at the final angle, then mark A–D on the floor.";
+  cameraFile.closest("label").hidden = true;
+  cameraIndex.value = previewQuery.get("source") || "0";
+  cameraIndex.readOnly = true;
+  freezeButton.hidden = false;
+  camera.hidden = true;
+  liveImage.hidden = false;
+  frameTitle.textContent = "Live camera";
+
+  async function refreshLive() {
+    if (streaming) {
+      try {
+        const response = await fetch("/live.jpg", {cache: "no-store"});
+        if (!response.ok) throw new Error("Waiting for the detector.");
+        const blob = await response.blob();
+        if (streaming) {
+          const previousUrl = liveUrl;
+          liveUrl = URL.createObjectURL(blob);
+          liveImage.src = liveUrl;
+          if (previousUrl) URL.revokeObjectURL(previousUrl);
+          freezeButton.disabled = false;
+          status.textContent = "Live";
+        }
+      } catch {
+        if (streaming) {
+          freezeButton.disabled = true;
+          status.textContent = "Waiting for the detector’s live feed.";
+        }
+      }
+    }
+    setTimeout(refreshLive, 300);
+  }
+
+  freezeButton.addEventListener("click", () => {
+    streaming = !streaming;
+    camera.hidden = streaming;
+    liveImage.hidden = !streaming;
+    frameTitle.textContent = streaming ? "Live camera" : "Frozen camera frame";
+    freezeButton.textContent = streaming ? "Freeze frame" : "Resume live";
+    if (!streaming) {
+      void loadFrame(liveUrl);
+      return;
+    }
+    frameRequest++;
+    freezeButton.disabled = true;
+    dimensions = null;
+    guides = [];
+    project = null;
+    drawGuides();
+    show(selectedPoint);
+  });
+  void refreshLive();
 }
 </script>
 </html>

@@ -52,13 +52,16 @@ export function createApi() {
       if (action === "resolve") args.p_outcome = outcome;
       return rpc(`${action}_check`, args);
     },
+    resetChecks() {
+      return rpc("reset_checks");
+    },
     async subscribe(id, listeners) {
       await client.realtime.setAuth();
       const channel = client.channel("welfare-room", {
         config: { private: true, presence: { key: id, enabled: true } },
       });
       channel.on("postgres_changes", { event: "*", schema: "public", table: "checks" },
-        (event) => listeners.check(event.new));
+        (event) => event.eventType === "DELETE" ? listeners.checksDeleted() : listeners.check(event.new));
       channel.on("postgres_changes", { event: "*", schema: "public", table: "feed_status" },
         (event) => listeners.feed(event.new));
       channel.on("postgres_changes", { event: "*", schema: "public", table: "people" },

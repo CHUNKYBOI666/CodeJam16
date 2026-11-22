@@ -36,6 +36,7 @@ import config  # noqa: E402
 from calibration import load_floor_polygon, save_calibration  # noqa: E402
 from capture import CaptureError, FrameSource  # noqa: E402
 from detector import PersonDownDetector, Posture, State, Status, alert_event  # noqa: E402
+from live_preview import CalibrationPreview  # noqa: E402
 from location import LocationCalibration, load_location_calibration  # noqa: E402
 from pose import REPO_ROOT, load_model, pick_device, people_from_result, predict, warm_up  # noqa: E402
 from publish import BackgroundPublisher, Publisher, PublishError  # noqa: E402
@@ -258,6 +259,8 @@ def main() -> None:
     ap.add_argument("--source", default=config.CAMERA_SOURCE,
                     help=f"camera index or video path (default: {config.CAMERA_SOURCE}; verify before use)")
     ap.add_argument("--calibrate", action="store_true", help="click the floor polygon on the first frame and exit")
+    ap.add_argument("--calibration-preview", type=int, metavar="PORT",
+                    help="serve the live floor editor on local 127.0.0.1 (camera only)")
     ap.add_argument("--calibration", default=str(REPO_ROOT / config.CALIBRATION_PATH), help="calibration json path")
     ap.add_argument("--location-calibration", type=Path, help="map calibration from the verified camera frame")
     ap.add_argument("--camera-id", default=config.CAMERA_ID, help="camera id reported with alerts")
@@ -280,6 +283,10 @@ def main() -> None:
 
     source = parse_source(args.source)
     source_kind = "live" if isinstance(source, int) else "replay"
+    if args.calibration_preview is not None and (
+        source_kind != "live" or args.calibrate or not 0 <= args.calibration_preview <= 65535
+    ):
+        ap.error("--calibration-preview needs a live detector and a port from 0 to 65535")
     publisher = None
     if args.publish and not args.calibrate:
         try:
@@ -339,6 +346,17 @@ def main() -> None:
         raise
     print(f"[run] warmed up at {reader.width}x{reader.height} in {time.perf_counter() - t_warm:.1f}s")
 
+    preview = None
+    if args.calibration_preview is not None:
+        try:
+            preview = CalibrationPreview(args.calibration_preview, source)
+        except OSError as err:
+            reader.close()
+            if publisher:
+                publisher.close("offline", "Camera offline", source_kind)
+            raise SystemExit(f"[run] Could not start the local calibration preview: {err}") from None
+        print(f"[run] Live floor editor: {preview.url}")
+
     detector = PersonDownDetector(floor_polygon=floor, frame_size=(reader.width, reader.height))
     reader.start()  # capture (and file pacing) begins only after the model is warm
 
@@ -365,6 +383,8 @@ def main() -> None:
                 break
             if frame is None:  # end of file
                 break
+            if preview is not None:
+                preview.update(frame.image)
 
             t0 = time.perf_counter()
             result = predict(model, frame.image, device)
@@ -443,6 +463,8 @@ def main() -> None:
         pass
     finally:
         reader.close()
+        if preview is not None:
+            preview.close()
         if publisher:
             publisher.close("offline", "Camera offline", source_kind)
         if writer is not None:

@@ -123,5 +123,32 @@ select throws_ok($$select public.accept_check((select id from checks where episo
 select is((select status from checks where episode_id = 'rollback'), 'needs_responder', 'failed history rolls back claim');
 reset role;
 
+set local role anon;
+select throws_ok($$select public.reset_checks()$$,
+    '42501', null, 'anonymous browser cannot reset');
+reset role;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000009';
+select throws_ok($$select public.reset_checks()$$,
+    '42501', 'Join first', 'unjoined browser cannot reset');
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000002';
+select is((select count(*)::integer from checks), 3, 'unauthorized resets preserve all checks');
+select is(public.reset_checks(), 3, 'a joined member can reset all checks');
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000001';
+select is(jsonb_array_length(public.room_snapshot()->'checks'), 0, 'reset clears the room snapshot');
+select is((select count(*)::integer from check_events), 0, 'reset clears check history');
+select is(public.get_invite_code(), 'test-room', 'reset preserves the room invite');
+select is((select count(*)::integer from people), 2, 'reset preserves room members');
+select is((select status from feed_status where id = 1), 'replay', 'reset preserves the feed');
+select is(public.reset_checks(), 0, 'another joined member can reset an empty room');
+reset role;
+
+set local role service_role;
+select lives_ok($$
+    select public.create_check('{"episode_id":"after-reset","signal":"possible_person_down","camera_id":"demo-camera","detected_at":"2026-01-01T00:00:00Z","source":"replay"}')
+$$, 'publisher can create a new check after reset');
+reset role;
+
 select * from finish();
 rollback;

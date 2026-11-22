@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#f7f6f1">
-  <title>Welfare checks</title>
+  <title>Spotter</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="top">
     <div class="top-inner">
-      <span class="brand"><span class="brand-mark" aria-hidden="true">+</span> Welfare checks</span>
+      <span class="brand"><span class="brand-mark" aria-hidden="true">+</span> Spotter</span>
       <div class="identity" id="identity" hidden>
         <span id="viewer"></span>
         <button class="text-button" id="rename" type="button">Change name</button>
@@ -20,7 +20,7 @@
   </header>
   <main class="shell">
     <section class="join" id="join">
-      <h1 id="join-title">Join the welfare check</h1>
+      <h1 id="join-title">Join Spotter</h1>
       <form id="join-form">
         <label for="name">Your name</label>
         <input id="name" name="name" maxlength="40" autocomplete="given-name" required>
@@ -38,7 +38,13 @@
       </section>
       <p id="connection" role="status" class="connection" hidden>Reconnecting…</p>
       <section class="check-section" aria-labelledby="checks-title">
-        <div class="section-head"><h2 id="checks-title">Checks</h2><span id="check-count"></span></div>
+        <div class="section-head">
+          <h2 id="checks-title">Checks</h2>
+          <div class="check-heading-actions">
+            <span id="check-count" class="muted"></span>
+            <button type="button" id="reset-checks" class="text-button" disabled>Reset checks</button>
+          </div>
+        </div>
         <p id="action-feedback" role="status" class="feedback" hidden></p>
         <div id="checks"></div>
         <details id="closed" hidden>
@@ -63,6 +69,17 @@
       </section>
     </div>
   </main>
+  <dialog id="reset-dialog" aria-labelledby="reset-title" aria-describedby="reset-description">
+    <form id="reset-form">
+      <h2 id="reset-title">Reset all checks?</h2>
+      <p id="reset-description">This deletes all active and closed checks and their history for everyone in the room.</p>
+      <p id="reset-error" role="alert" class="feedback" hidden></p>
+      <div class="reset-actions">
+        <button type="button" id="reset-cancel" class="button" autofocus>Cancel</button>
+        <button type="submit" id="reset-confirm" class="button">Delete all checks</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="takeover" aria-labelledby="takeover-title">
     <div class="alert-content">
       <p class="alert-kicker"><span class="status-dot" aria-hidden="true"></span> Needs a responder</p>

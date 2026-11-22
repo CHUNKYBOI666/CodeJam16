@@ -1,4 +1,6 @@
-# CodeJam16
+# Spotter
+
+For the demo, start with [Run the live iPhone-to-Spotter pipeline](#run-the-live-iphone-to-spotter-pipeline).
 
 See the [implementation handoff](docs/implementation-handoff.md) for branch ownership, shared interfaces, and review steps.
 
@@ -8,7 +10,7 @@ See the [implementation handoff](docs/implementation-handoff.md) for branch owne
 | --- | --- | --- |
 | `vision/` | Capture + person-down detector: camera/clip capture, pose model, posture rule, calibration, overlay, clip evaluation | David |
 | `tests/vision/` | Capture, detector and calibration tests | David |
-| `backend/`, `frontend/` | Staff web app: Flask + SQLite backend, staff screens (responder queue, supervisor map) | Teammate |
+| `backend/`, `frontend/` | Supabase migrations and the Spotter responder web app | Teammate |
 
 ## Setup (Python 3.12)
 
@@ -101,9 +103,9 @@ yet, or lets staff finish an existing check.
 .venv/bin/python vision/eval_clips.py    # every clip in clips/: alerts and down->alert time
 ```
 
-## Hosted welfare checks
+## Hosted Spotter
 
-Open the [Vercel demo](https://codejam16-welfare-checks.vercel.app) with the room QR. Guests enter a name and receive alerts while Checks is open. One person can claim each check and only that person can mark arrival or record the outcome. The Mac publishes the event and feed status while video stays on the Mac.
+Open [Spotter on Vercel](https://codejam16-welfare-checks.vercel.app) with the room QR. Guests enter a name and receive alerts while **Checks** is open. One person can claim each check and only that person can mark arrival or record the outcome. For the demo, any joined member can confirm **Reset checks** to delete all active and closed checks and their history for everyone. The Mac publishes alert metadata and feed status while video stays on the Mac.
 
 ### Develop and test locally
 
@@ -127,27 +129,27 @@ Copy `frontend/.env.example` to `frontend/.env.local`. Set the local Supabase UR
 Set `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in the Mac's shell using the local or hosted project's settings. Then run the publisher or the mock from the repo root.
 
 ```sh
-python tools/mock_check.py
-python tools/mock_check.py --episode-id demo-dedupe
-python tools/mock_check.py --episode-id demo-dedupe
-python vision/run.py --source local/rehearsal.mp4 --publish
-python vision/run.py --source 0 --publish
-python -m pytest -q
+.venv/bin/python tools/mock_check.py
+.venv/bin/python tools/mock_check.py --episode-id demo-dedupe
+.venv/bin/python tools/mock_check.py --episode-id demo-dedupe
+.venv/bin/python vision/run.py --source local/rehearsal.mp4 --publish
+.venv/bin/python vision/run.py --source 0 --publish
+.venv/bin/python -m pytest -q
 ```
 
 ### Provision and rehearse the hosted demo
 
 1. Apply the migrations from `backend/` with `supabase db push --remote` on the linked demo project. Enable Anonymous Sign-Ins and use private Realtime channels. Set Auth Site URL to the production Vercel origin. Set the anonymous sign-in rate limit for the expected arrival burst on the shared venue IP. The local seed is for development.
 2. Set a generated room code in `app_private.app_settings` using the trusted SQL editor. Upsert the `room_code` row to rotate it. Existing joined sessions retain their assignments. Start from a fresh browser after rotation to verify that the old QR fails.
-3. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `VITE_SITE_URL` in the Vercel project and deploy from the repo root. Export the publisher secret only on the Mac. The app's **Bring someone in** section shows the printable QR and join link.
+3. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `VITE_SITE_URL` in the linked Vercel project. Run `vercel deploy --prod` from the repository root. Export the publisher secret only on the Mac. The app's **Bring someone in** section shows the printable QR and join link.
 4. Run a mock, then test a staged replay and the live iPhone camera. Measure time to join on Wi-Fi and cellular, database creation to first display, and detector confirmation to first display. Verify sound after joining, simultaneous claim, refresh, rename, all three outcomes, and reconnection. A refreshed mobile browser may require another tap to enable audio.
 5. If capture fails before creating a check, restart vision with the labeled staged replay. If capture drops after a check exists, continue that check in the room. If internet service fails, use the Flask build from `feat/join-by-name` on a controlled LAN and two independent browser profiles.
 
 Record results in [the rehearsal log](docs/hosted-rehearsal.md).
 
-### Run the full iPhone-to-room pipeline on macOS
+### Run the live iPhone-to-Spotter pipeline
 
-The [hosted viewer](https://codejam16-welfare-checks.vercel.app) and Supabase migration are deployed. Run these commands from the repository root. Install Python 3.12 if needed.
+Use a Mac with Python 3.12, the iPhone, the team's Spotter room QR, and the Supabase server key for the demo project. The hosted viewer and database are already deployed. Run these commands from the repository root.
 
 ```bash
 python3.12 -m venv .venv
@@ -155,16 +157,14 @@ python3.12 -m venv .venv
 mkdir -p local
 ```
 
-**Verify the camera and calibrate once for this mounting position.** Secure the iPhone in its final overhead position, connect it over USB‑C, and lock it. Quit any earlier detector window with **Q** before probing. Use the captured image to verify the index. If source `0` shows the FaceTime camera, probe source `1` and use the verified index in the editor and launch command.
+**Calibrate the live view.** Connect the iPhone over USB‑C and lock it. Quit any earlier detector window with **Q**. Mount the phone at the intended angle so the four floor points are visible. Use the camera image to verify the index. If source `0` shows the FaceTime camera, quit, change the first line below to `camera_index=1`, and rerun.
 
 ```bash
-system_profiler SPCameraDataType
-.venv/bin/python vision/capture_probe.py --source 0 --frames 30 --snapshot local/kitchen-frame.png
-open local/kitchen-frame.png
-open tools/kitchen-calibration.html
+camera_index=0
+.venv/bin/python -u vision/run.py --source "$camera_index" --calibration-preview 5199
 ```
 
-Load the PNG in the editor. Mark A–D clockwise from the upper-left on four floor-level points that define a 3:2 rectangle. Preview both rehearsal spots by clicking the floor. Set the verified camera index and click **Export calibration**. Save the resulting JSON as `local/kitchen-minimap-setup.json`. If your calibrated export is already in Downloads, copy it into place and adjust the filename if your browser numbered the download.
+Open the printed **Live floor editor** URL on the same Mac. Once the view is stable, click **Freeze frame**. Mark A–D clockwise from the upper-left on four floor-level points that form a 3:2 rectangle. Click the floor to preview the pin, then click **Export calibration**. Stop the calibration run with **Q** in the pose window or **Ctrl+C** in the terminal. Copy the new export, using its actual filename if the browser numbered it.
 
 ```bash
 cp ~/Downloads/kitchen-minimap-setup.json local/kitchen-minimap-setup.json
@@ -179,10 +179,12 @@ IFS= read -rs SUPABASE_SECRET_KEY
 printf '\n'
 export SUPABASE_SECRET_KEY
 
-.venv/bin/python -u vision/run.py --source 0 --camera-id kitchen-iphone --zone kitchen \
+.venv/bin/python -u vision/run.py --source "$camera_index" --camera-id kitchen-iphone --zone kitchen \
   --location-calibration local/kitchen-minimap-setup.json --publish
 ```
 
 Verify the image and A–D outline in **CodeJam16 pose**, then press **M** to enable minimap dots for that session. Press **U** if the phone moves. Capture and export again after a framing change. Use **Q** or **Ctrl+C** to stop the detector.
 
-**Receive and verify the alert.** Scan the room QR on a phone, join, and keep **Checks** open. Stage one down episode, stand clearly upright for at least two continuous seconds, and stage another at a different spot. A mapped alert shows a red dot on the minimap. Claim it and refresh to verify that the dot stays with the check. An alert without a valid pin shows the place label.
+**Receive and verify the alert.** Scan the team's QR on a phone, join Spotter, and keep **Checks** open. Stage one down episode, stand clearly upright for at least two continuous seconds, and stage another at a different spot. A mapped alert shows a red dot on the minimap. Claim it and refresh to verify that the dot stays with the check. An alert without a valid pin shows the place label.
+
+If you cannot open the live editor, save a frame using [the capture probe](#capture-probe-on-macos) and open `tools/kitchen-calibration.html` with `open tools/kitchen-calibration.html`. Load the saved image, set the verified camera index, and follow the same A–D and export steps.
