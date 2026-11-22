@@ -96,3 +96,45 @@ yet, or lets staff finish an existing check.
 .venv/bin/python -m pytest -q
 .venv/bin/python vision/eval_clips.py    # every clip in clips/: alerts and down->alert time
 ```
+
+## Hosted welfare checks
+
+Open the [Vercel demo](https://codejam16-welfare-checks.vercel.app) with the room QR. Guests enter a name and receive alerts while Checks is open. One person can claim each check and only that person can mark arrival or record the outcome. The Mac publishes the event and feed status while video stays on the Mac.
+
+### Develop and test locally
+
+Use Node 24, Python 3.12, Docker, the Supabase CLI and `psql`.
+
+```sh
+cd backend
+supabase start
+supabase db reset
+supabase test db
+cd ..
+node backend/tests/race.mjs
+npm ci --prefix frontend
+npm test --prefix frontend
+```
+
+Copy `frontend/.env.example` to `frontend/.env.local`. Set the local Supabase URL and the **publishable** key from the CLI's local status. Run `npm run dev --prefix frontend` and open `http://localhost:5173/?room=codejam-local`. Use two independent browser profiles to exercise simultaneous claims. To verify the packaged frontend, run `npm run build --prefix frontend`.
+
+Set `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in the Mac's shell using the local or hosted project's settings. Then run the publisher or the mock from the repo root.
+
+```sh
+python tools/mock_check.py
+python tools/mock_check.py --episode-id demo-dedupe
+python tools/mock_check.py --episode-id demo-dedupe
+python vision/run.py --source local/rehearsal.mp4 --publish
+python vision/run.py --source 0 --publish
+python -m pytest -q
+```
+
+### Provision and rehearse the hosted demo
+
+1. Apply the migrations from `backend/` with `supabase db push --remote` on the linked demo project. Enable Anonymous Sign-Ins and use private Realtime channels. Set Auth Site URL to the production Vercel origin. Set the anonymous sign-in rate limit for the expected arrival burst on the shared venue IP. The local seed is for development.
+2. Set a generated room code in `app_private.app_settings` using the trusted SQL editor. Upsert the `room_code` row to rotate it. Existing joined sessions retain their assignments. Start from a fresh browser after rotation to verify that the old QR fails.
+3. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `VITE_SITE_URL` in the Vercel project and deploy from the repo root. Export the publisher secret only on the Mac. The app's **Bring someone in** section shows the printable QR and join link.
+4. Run a mock, then test a staged replay and the live iPhone camera. Measure time to join on Wi-Fi and cellular, database creation to first display, and detector confirmation to first display. Verify sound after joining, simultaneous claim, refresh, rename, all three outcomes, and reconnection. A refreshed mobile browser may require another tap to enable audio.
+5. If capture fails before creating a check, restart vision with the labeled staged replay. If capture drops after a check exists, continue that check in the room. If internet service fails, use the Flask build from `feat/join-by-name` on a controlled LAN and two independent browser profiles.
+
+Record results in [the rehearsal log](docs/hosted-rehearsal.md).
