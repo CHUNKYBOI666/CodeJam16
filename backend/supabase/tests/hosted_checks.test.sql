@@ -6,6 +6,11 @@ select no_plan();
 select has_table('public', 'checks', 'checks table exists');
 select col_is_unique('public', 'checks', 'episode_id', 'episode IDs are unique');
 select ok(exists (select from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'checks'), 'checks use Realtime');
+select ok(exists (
+    select from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'checks'
+      and attnames @> array['map_x', 'map_y', 'map_version']::name[]
+), 'checks publish map fields through Realtime');
 
 insert into app_private.app_settings(key, value) values ('room_code', 'test-room')
 on conflict (key) do update set value = excluded.value;
@@ -43,6 +48,32 @@ $$, 'service ingests event');
 select lives_ok($$select public.report_feed('replay', 'Rehearsal clip', 12, 'replay')$$, 'service reports feed');
 reset role;
 select is((select place from checks where episode_id = 'test-episode'), 'Near the stage', 'use the default place');
+select is((select map_version from checks where episode_id = 'test-episode'), null, 'legacy event has no map');
+
+set local role service_role;
+select lives_ok($$
+    select public.create_check('{"episode_id":"kitchen-pin","signal":"possible_person_down","camera_id":"kitchen","detected_at":"2026-01-01T00:00:00Z","source":"live","map_version":"kitchen-v1","map_x":0.2,"map_y":0.8}')
+$$, 'service ingests a pin');
+select lives_ok($$
+    select public.create_check('{"episode_id":"kitchen-pin","signal":"possible_person_down","camera_id":"kitchen","detected_at":"2026-01-01T00:00:00Z","source":"live","map_version":"kitchen-v1","map_x":0.3,"map_y":0.1}')
+$$, 'service retries a mapped episode');
+select throws_ok($$
+    select public.create_check('{"episode_id":"partial-pin","signal":"possible_person_down","camera_id":"kitchen","detected_at":"2026-01-01T00:00:00Z","source":"live","map_version":"kitchen-v1","map_x":0.2}')
+$$, '23514', null, 'incomplete pin rejected');
+select throws_ok($$
+    select public.create_check('{"episode_id":"outside-pin","signal":"possible_person_down","camera_id":"kitchen","detected_at":"2026-01-01T00:00:00Z","source":"live","map_version":"kitchen-v1","map_x":0.2,"map_y":1.1}')
+$$, '23514', null, 'out-of-range pin rejected');
+reset role;
+
+set local role authenticated;
+select is((public.accept_check((select id from checks where episode_id = 'kitchen-pin'))).map_y,
+    0.8::numeric, 'claim retains the original pin after a retry');
+select is(
+    (select item->>'map_version' from jsonb_array_elements(public.room_snapshot()->'checks') as item
+     where item->>'episode_id' = 'kitchen-pin'),
+    'kitchen-v1', 'room snapshot includes the map version'
+);
+reset role;
 
 set local role service_role;
 select lives_ok($$

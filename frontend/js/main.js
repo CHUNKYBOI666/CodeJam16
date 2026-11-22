@@ -47,6 +47,7 @@ const takeover = createTakeover({
   place: get("takeover-place"),
   age: get("takeover-age"),
   source: get("takeover-source"),
+  map: get("takeover-map"),
   accept: get("takeover-accept"),
   dismiss: get("takeover-dismiss"),
 }, (id) => void sendAction(id, "accept"), (id) => {

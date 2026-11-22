@@ -36,6 +36,7 @@ import config  # noqa: E402
 from calibration import load_floor_polygon, save_calibration  # noqa: E402
 from capture import CaptureError, FrameSource  # noqa: E402
 from detector import PersonDownDetector, Posture, State, Status, alert_event  # noqa: E402
+from location import LocationCalibration, load_location_calibration  # noqa: E402
 from pose import REPO_ROOT, load_model, pick_device, people_from_result, predict, warm_up  # noqa: E402
 from publish import BackgroundPublisher, Publisher, PublishError  # noqa: E402
 
@@ -106,19 +107,20 @@ def ui_scale(img) -> float:
     return max(1.0, min(img.shape[:2]) / 540.0)
 
 
-def draw_panel(img, lines: list[tuple[str, tuple[int, int, int]]]) -> int:
-    """Draw a text panel top-left; returns its bottom y."""
+def draw_panel(img, lines: list[tuple[str, tuple[int, int, int]]], *, right: bool = False) -> int:
+    """Draw a panel along the top edge and return its bottom y."""
     k = ui_scale(img)
     font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.6 * k, max(2, int(2 * k))
     pad, line_h = int(10 * k), int(24 * k)
     width = max(cv2.getTextSize(t, font, scale, thick)[0][0] for t, _ in lines) + 2 * pad
+    left = max(0, img.shape[1] - width) if right else 0
     height = line_h * len(lines) + pad
     overlay = img.copy()
-    cv2.rectangle(overlay, (0, 0), (width, height), (0, 0, 0), -1)
+    cv2.rectangle(overlay, (left, 0), (left + width, height), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.55, img, 0.45, 0, img)
     for i, (text, color) in enumerate(lines):
         y = pad + line_h * (i + 1) - 6
-        cv2.putText(img, text, (pad, y), font, scale, color, thick, cv2.LINE_AA)
+        cv2.putText(img, text, (left + pad, y), font, scale, color, thick, cv2.LINE_AA)
     return height
 
 
@@ -222,12 +224,42 @@ def parse_source(raw: str) -> int | str:
     return raw
 
 
+def build_confirmed_event(
+    status: Status, *, camera_id: str, zone_id: str, source: str,
+    location: LocationCalibration | None, frame_size: tuple[int, int],
+    detected_at: datetime | None = None,
+) -> dict | None:
+    if status.alert is None:
+        return None
+    event = alert_event(
+        status.alert, camera_id=camera_id, zone_id=zone_id, source=source,
+        detected_at=detected_at or datetime.now(timezone.utc),
+    )
+    if location is not None:
+        event.update(location.map_fields(status.reading.torso, frame_size))
+    return event
+
+
+def draw_location_check(img, calibration: LocationCalibration, enabled: bool) -> None:
+    height, width = img.shape[:2]
+    points = (calibration.image_corners * (width, height)).round().astype(np.int32)
+    color = GREEN if enabled else AMBER
+    cv2.polylines(img, [points], True, color, max(2, int(2 * ui_scale(img))), cv2.LINE_AA)
+    for index, point in enumerate(points):
+        cv2.circle(img, tuple(point), max(5, int(8 * ui_scale(img))), color, -1, cv2.LINE_AA)
+        org = tuple(np.clip(point + (12, 8), (0, 24), (width - 30, height - 8)))
+        cv2.putText(img, "ABCD"[index], org, cv2.FONT_HERSHEY_SIMPLEX, .8, color, 2, cv2.LINE_AA)
+    label = "Minimap on  |  U: disable" if enabled else "Verify camera and A-D  |  M: enable minimap"
+    draw_panel(img, [(label, color)], right=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--source", default=config.CAMERA_SOURCE,
-                    help=f"camera index or video path (default: {config.CAMERA_SOURCE}, kitchen phone)")
+                    help=f"camera index or video path (default: {config.CAMERA_SOURCE}; verify before use)")
     ap.add_argument("--calibrate", action="store_true", help="click the floor polygon on the first frame and exit")
     ap.add_argument("--calibration", default=str(REPO_ROOT / config.CALIBRATION_PATH), help="calibration json path")
+    ap.add_argument("--location-calibration", type=Path, help="map calibration from the verified camera frame")
     ap.add_argument("--camera-id", default=config.CAMERA_ID, help="camera id reported with alerts")
     ap.add_argument("--zone-id", "--zone", dest="zone_id", default=config.ZONE_ID, help="zone id reported with alerts")
     ap.add_argument("--weights", help="override pose weights (default: yolo26n-pose, fallback yolo11n-pose)")
@@ -279,6 +311,21 @@ def main() -> None:
               f"Run with --calibrate first.")
     else:
         print(f"[run] floor polygon: {len(floor)} points from {args.calibration}")
+
+    location = None
+    if args.location_calibration:
+        try:
+            location = load_location_calibration(
+                args.location_calibration, args.camera_id, source, (reader.width, reader.height),
+            )
+        except (OSError, ValueError, cv2.error) as err:
+            print(f"[run] Location unavailable: {err}. Alerts will show the place label.", file=sys.stderr)
+    location_enabled = location is not None and source_kind == "replay"
+    if location is not None and source_kind == "live":
+        if args.no_show:
+            print("[run] Live minimap needs camera confirmation in the preview. Alerts will show the place label.")
+        else:
+            print("[run] Confirm the iPhone view and A–D in the preview, then press M to enable pins.")
 
     device = args.device or pick_device()
     try:
@@ -335,16 +382,17 @@ def main() -> None:
                 label = "Rehearsal clip" if source_kind == "replay" else "Live"
                 publisher.report(source_kind, label, fps_ema or 0.0, source_kind)
 
-            if status.alert:
+            height, width = frame.image.shape[:2]
+            matching_location = location if location is not None and location.dimensions == (width, height) else None
+            if matching_location is None:
+                location_enabled = False
+            event = build_confirmed_event(
+                status, camera_id=args.camera_id, zone_id=args.zone_id, source=source_kind,
+                location=matching_location if location_enabled else None, frame_size=(width, height),
+            )
+            if event is not None:
                 alerts += 1
                 a = status.alert
-                event = alert_event(
-                    a,
-                    camera_id=args.camera_id,
-                    zone_id=args.zone_id,
-                    source=source_kind,
-                    detected_at=datetime.now(timezone.utc),
-                )
                 print(f"[ALERT] {a.episode_id} t={a.detected_at_ms / 1000:.2f}s "
                       f"(down since {a.down_started_ms / 1000:.2f}s, "
                       f"+{(a.detected_at_ms - a.down_started_ms) / 1000:.2f}s)")
@@ -370,9 +418,16 @@ def main() -> None:
                 writer.write(img)
 
             if not args.no_show:
+                if matching_location is not None and source_kind == "live":
+                    draw_location_check(img, matching_location, location_enabled)
                 cv2.imshow("CodeJam16 pose", img)
-                if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
                     break
+                if source_kind == "live" and matching_location is not None and key in (ord("m"), ord("M")):
+                    location_enabled = True
+                if key in (ord("u"), ord("U")):
+                    location_enabled = False
 
             if args.log_every and now - last_log >= args.log_every:
                 last_log = now

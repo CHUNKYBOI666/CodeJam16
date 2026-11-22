@@ -459,3 +459,131 @@ def test_default_episode_ids_are_unique_uuids():
     c = Clock(det).hold(LYING, 3).hold(STANDING, 2.5).hold(LYING, 3)
     ids = [a.episode_id for a in c.alerts]
     assert len(set(ids)) == 2 and all(len(i) == 36 for i in ids)
+
+
+def test_confirmed_episode_emits_its_selected_torso_location(tmp_path):
+    import json
+    from datetime import datetime, timezone
+
+    from location import load_location_calibration
+    from run import build_confirmed_event
+
+    size = (1000, 1000)
+    path = tmp_path / "verified-setup.json"
+    path.write_text(json.dumps({
+        "points": {"image": [[0, 0.5], [1, 0.5], [1, 1], [0, 1]]},
+        "dimensions": size,
+        "camera_id": "kitchen-iphone",
+        "source": 0,
+        "map_version": "kitchen-v2",
+    }))
+    location = load_location_calibration(path, "kitchen-iphone", 0, size)
+    det = make()
+    frame_ms = 0
+    events = []
+
+    def hold(keypoints, seconds, calibration=location):
+        nonlocal frame_ms
+        for _ in range(round(seconds * 10)):
+            status = det.update(frame_ms, *keypoints)
+            event = build_confirmed_event(
+                status, camera_id="kitchen-iphone", zone_id="kitchen", source="live",
+                detected_at=datetime(2026, 11, 22, tzinfo=timezone.utc),
+                location=calibration, frame_size=size,
+            )
+            if event is not None:
+                events.append(event)
+            frame_ms += 100
+
+    wall = person(0, hip=(325, 750))
+    chair = person(0, hip=(825, 900), torso_len=150, leg_len=125)
+    hold(wall, 1.9)
+    assert not events
+    hold(wall, 1.2)
+    assert len(events) == 1
+    assert events[0]["map_x"] == pytest.approx(0.25)
+    assert events[0]["map_y"] == pytest.approx(0.5)
+    assert events[0]["map_version"] == "kitchen-v2"
+
+    hold(STANDING, 1.5)
+    hold(UNKNOWN, 0.5)
+    hold(STANDING, 1.5)
+    hold(chair, 2.2)
+    assert len(events) == 1
+
+    hold(STANDING, 2.2)
+    hold(chair, 2.2)
+    assert len(events) == 2
+    assert events[1]["episode_id"] != events[0]["episode_id"]
+    assert events[1]["map_x"] == pytest.approx(0.75)
+    assert events[1]["map_y"] == pytest.approx(0.8)
+
+    hold(STANDING, 2.2)
+    hold(wall, 2.2, calibration=None)
+    assert len(events) == 3
+    assert not {"map_x", "map_y", "map_version"}.intersection(events[2])
+
+
+def test_live_preview_arms_pin_publishing_only_after_confirmation(tmp_path, monkeypatch, capsys):
+    import json
+    import sys
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    import run
+    from capture import Frame
+    from detector import Person
+
+    size = (1000, 1000)
+    path = tmp_path / "setup.json"
+    path.write_text(json.dumps({
+        "points": {"image": [[0, 0.5], [1, 0.5], [1, 1], [0, 1]]},
+        "dimensions": size, "camera_id": "kitchen-iphone", "source": 0, "map_version": "kitchen-v2",
+    }))
+    frame_image = np.zeros((1000, 1000, 3), dtype=np.uint8)
+    rehearsal = [person(0, hip=(325, 750))] * 23 + [STANDING] * 23 + [
+        person(0, hip=(825, 900), torso_len=150, leg_len=125),
+    ] * 23
+    frames = iter(Frame(frame_image, index * 100, index) for index in range(len(rehearsal)))
+    publisher = SimpleNamespace(events=[])
+    publisher.publish_check = publisher.events.append
+    publisher.report_feed = lambda *_: None
+
+    monkeypatch.setattr(run, "FrameSource", lambda *_args, **_kwargs: SimpleNamespace(
+        width=1000, height=1000, backend="test", dropped=0, wait_ready=lambda: frame_image,
+        start=lambda: None, close=lambda: None, latest=lambda: next(frames, None),
+    ))
+    monkeypatch.setattr(run.Publisher, "from_env", lambda: publisher)
+    monkeypatch.setattr(run, "load_model", lambda _: (None, "test"))
+    monkeypatch.setattr(run, "warm_up", lambda *_: None)
+    people = iter(rehearsal)
+
+    # Stub model output while exercising the actual detector and preview overlay.
+    class PoseResult:
+        def __init__(self, pose):
+            self.pose = pose
+
+        def plot(self, **_options):
+            return frame_image.copy()
+
+    monkeypatch.setattr(run, "predict", lambda *_: PoseResult(next(people)))
+    monkeypatch.setattr(run, "people_from_result", lambda result: [Person(*result.pose, 0.9)])
+    monkeypatch.setattr(run.cv2, "imshow", lambda *_: None)
+    monkeypatch.setattr(run.cv2, "destroyAllWindows", lambda: None)
+    keys = iter([-1] * 25 + [ord("m")])
+    monkeypatch.setattr(run.cv2, "waitKey", lambda _: next(keys, -1))
+    monkeypatch.setattr(sys, "argv", [
+        "run.py", "--source", "0", "--camera-id", "kitchen-iphone", "--zone", "kitchen",
+        "--location-calibration", str(path), "--device", "cpu", "--publish", "--log-every", "0",
+    ])
+    with monkeypatch.context() as restore_stdout:
+        restore_stdout.setattr(sys, "stdout", sys.stdout)
+        run.main()
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert publisher.events == events
+    assert len(events) == 2
+    assert "map_x" not in events[0]
+    assert events[1]["map_x"] == pytest.approx(0.75)
+    assert events[1]["map_y"] == pytest.approx(0.8)

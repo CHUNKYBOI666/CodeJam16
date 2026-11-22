@@ -296,3 +296,13 @@ def test_warmup_time_before_start_does_not_count_as_stall():
         time.sleep(0.3)  # "model warmup" longer than the stall timeout
         src.start()
         assert src.latest() is not None
+
+
+def test_probe_saves_first_frame_without_resizing(tmp_path):
+    snapshot = tmp_path / "kitchen" / "frame.png"
+    video = FakeVideo([(23, 0), (82, 40)])
+    with patch.object(cv2, "VideoCapture", return_value=video):
+        assert probe_main([
+            "--source", str(CLIP), "--frames", "2", "--snapshot", str(snapshot),
+        ]) == 0
+    np.testing.assert_array_equal(cv2.imread(str(snapshot)), image(23))

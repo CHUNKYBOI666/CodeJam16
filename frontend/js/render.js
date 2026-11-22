@@ -1,3 +1,5 @@
+import { renderKitchenMap } from "./kitchen-map.js";
+
 export const outcomes = ["Confirmed person down", "False alarm", "Couldn't verify"];
 
 export function ownerLabel(check, viewerId) {
@@ -42,7 +44,8 @@ export function renderChecks(container, rows, { viewerId, editor, online, pendin
     if (category) heading.append(element("span", category, "source"));
     const timestamp = element("span", null, "age");
     timestamp.dataset.at = closed ? check.resolved_at : check.detected_at;
-    text.append(heading, element("p", check.place, "place"), timestamp);
+    const map = renderKitchenMap(check);
+    text.append(heading, map ?? element("p", check.place, "place"), timestamp);
     if (closed) {
       text.append(element("p", `${check.outcome} · ${check.owner_name}`, "owner"));
     } else if (!waiting) {

@@ -16,3 +16,13 @@ Production demo at [Vercel](https://codejam16-welfare-checks.vercel.app). The ro
 | LAN fallback | Two independent responders, one winner, owner can refresh | 37 Flask store and workflow tests passed on the reference branch. Device rehearsal pending |
 
 ![Mock takeover on a mobile viewport](screenshots/hosted-alert.png)
+
+## Kitchen wall-and-chair minimap
+
+| Check | Result |
+| --- | --- |
+| Calibration export | Browser smoke verified adjusted corners, actual source dimensions, import, invalidation on replacement, and matching Python projection. |
+| Detector integration | Synthetic keypoint episodes verified one alert per down episode, two-second upright rearm, and text-only publishing until the operator confirms the iPhone framing in the live preview. |
+| Local data and viewer | PostgreSQL 17 ran the schema and pgTAP tests with Supabase Auth and Realtime fixtures. All 50 simultaneous-claim races preserved the original pin in both room snapshots. A mobile-sized browser verified takeover and check-row rendering. |
+| Hosted rollout | Applied the kitchen map migration and promoted the matching Vercel viewer. Verified that the production room serves the wall-and-chair layout. |
+| Mounted live rehearsal | Loaded the exported calibration on the verified iPhone feed. Confirmed and forwarded two wall-side pins from the running detector to the hosted room. The chair-side alert and physical phone display remain to be verified. |

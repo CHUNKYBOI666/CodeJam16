@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitchen minimap · Wall and chair</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: #f3f0e9; color: #29241e; font: 16px/1.45 system-ui, sans-serif; }
+main { max-width: 75rem; margin: auto; padding: clamp(1rem, 4vw, 3rem); }
+h1 { margin: 0; font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -.055em; }
+h2 { margin: 0 0 .75rem; font-size: 1rem; }
+p { margin: .45rem 0 1rem; }
+.panels { display: grid; grid-template-columns: 1.85fr 1fr; gap: 1rem; }
+section { min-width: 0; padding: 1rem; background: #fffdfa; border: 1px solid #d8d1c5; border-radius: .75rem; }
+.camera { display: block; width: 100%; border-radius: .45rem; cursor: crosshair; touch-action: manipulation; }
+.corner { cursor: grab; touch-action: none; outline: none; }
+.corner:active { cursor: grabbing; }
+.corner:focus-visible .corner-disc { stroke: #ffd25d; stroke-width: 6; }
+.corner-label { fill: white; font-size: 23px; font-weight: 700; text-anchor: middle; dominant-baseline: central; pointer-events: none; user-select: none; }
+.controls { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+button { font: inherit; padding: .45rem .7rem; border: 1px solid #777063; border-radius: .4rem; background: #fffdfa; color: inherit; cursor: pointer; }
+button:hover { background: #f3f0e9; }
+.setup-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-bottom: 1rem; }
+.setup-controls label { display: grid; gap: .2rem; font-size: .9rem; }
+.setup-controls input[type="number"] { width: 5rem; }
+.setup-controls input[type="file"] { max-width: 13rem; }
+.status { min-height: 1.5em; margin-bottom: 0; }
+@media (max-width: 680px) { .panels { grid-template-columns: 1fr; } }
+.kitchen-map {width: min(100%, 14rem); margin: .65rem 0 0; }
+.kitchen-map figcaption { font-size: .85rem; font-weight: 700; margin-bottom: .35rem; }
+.kitchen-map-floor { position: relative; aspect-ratio: 3 / 2; margin-inline: .7rem; border: 1px solid #a59b8b; border-radius: .25rem; background: #f7f2eb; }
+.kitchen-map-wall { position: absolute; top: 0; left: -.45rem; height: 89%; border-left: .26rem solid #554d44; border-radius: .12rem; }
+.kitchen-map-chair { position: absolute; top: 14%; right: -.58rem; width: .43rem; height: 34%; border: 1px solid #655846; border-radius: .12rem; background: #cfba9c; }
+.kitchen-map-landmarks { display: flex; justify-content: space-between; margin-top: .24rem; font-size: .72rem; }
+.kitchen-map-pin { position: absolute; width: .9rem; height: .9rem; transform: translate(-50%, -50%); border: 2px solid white; border-radius: 50%; background: #d02732; box-shadow: 0 0 0 1px #8b1923; }
+#takeover .kitchen-map { width: min(100%, 15rem, 35vh); }
+.preview .kitchen-map { width: 100%; margin-top: 0; }
+.preview .kitchen-map figcaption { font-size: 1rem; }
+.preview .kitchen-map-landmarks { font-size: .9rem; }
+</style>
+<main>
+  <h1>Kitchen minimap</h1>
+  <p>Drag A–D to adjust coverage. Click the floor to preview a location, then export the calibration for the detector.</p>
+  <div class="panels">
+    <section>
+      <h2>Stable iPhone frame</h2>
+      <div class="setup-controls">
+        <label>Camera frame <input type="file" id="camera-file" accept="image/png,image/jpeg"></label>
+        <label>Saved calibration <input type="file" id="setup-file" accept=".json,application/json" disabled></label>
+        <label>Camera index <input type="number" id="camera-index" min="0" step="1" value="0"></label>
+      </div>
+      <svg class="camera" viewBox="0 0 1200 675" aria-label="Overhead frame with the wall on the left and chair on the right">
+        <image id="source-image" width="1200" height="675" />
+        <polygon id="outline" fill="#116c5a" fill-opacity=".12" stroke="white" stroke-width="3" stroke-dasharray="13 9" />
+        <g id="corners"></g>
+        <circle id="frame-pin" r="9" fill="#d02732" stroke="white" stroke-width="3" pointer-events="none" />
+      </svg>
+      <div class="controls">
+        <button type="button" data-point="0" hidden>Wall side</button>
+        <button type="button" data-point="1" hidden>Tape mark</button>
+        <button type="button" data-point="2" hidden>Chair side</button>
+        <button type="button" id="reset-corners">Reset A–D</button>
+        <button type="button" id="export-corners" disabled>Export calibration</button>
+      </div>
+    </section>
+    <section class="preview">
+      <h2>Alert minimap preview</h2>
+      <div id="map"></div>
+      <p class="status" id="status" role="status"></p>
+    </section>
+  </div>
+</main>
+<script>
+const mapVersion = "kitchen-v2";
+
+function kitchenLocation(check) {
+  const { map_version: version, map_x: x, map_y: y } = check;
+  if (version !== mapVersion || ![x, y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
+    return null;
+  }
+  const area = x < 1 / 3 ? "Wall side" : x > 2 / 3 ? "Chair side" : "Open floor";
+  return { x, y, area };
+}
+
+function renderKitchenMap(check) {
+  const location = kitchenLocation(check);
+  if (!location) return null;
+
+  const figure = document.createElement("figure");
+  figure.className = "kitchen-map";
+  const caption = document.createElement("figcaption");
+  caption.textContent = "Approximate location · " + location.area;
+  const map = document.createElement("div");
+  map.className = "kitchen-map-floor";
+  map.setAttribute("aria-hidden", "true");
+  const wall = document.createElement("span");
+  wall.className = "kitchen-map-wall";
+  const chair = document.createElement("span");
+  chair.className = "kitchen-map-chair";
+  const pin = document.createElement("span");
+  pin.className = "kitchen-map-pin";
+  pin.style.left = location.x * 100 + "%";
+  pin.style.top = location.y * 100 + "%";
+  map.append(wall, chair, pin);
+
+  const landmarks = document.createElement("div");
+  landmarks.className = "kitchen-map-landmarks";
+  const wallLabel = document.createElement("span");
+  wallLabel.textContent = "Wall";
+  const chairLabel = document.createElement("span");
+  chairLabel.textContent = "Chair";
+  landmarks.append(wallLabel, chairLabel);
+  figure.append(caption, map, landmarks);
+  return figure;
+}
+
+function transform(from,to) {
+  const matrix=from.flatMap(([x,y],i)=>{
+    const [u,v]=to[i]; return [[x,y,1,0,0,0,-u*x,-u*y,u],[0,0,0,x,y,1,-v*x,-v*y,v]];
+  });
+  for(let i=0;i<8;i++){
+    let pivot=i;
+    for(let j=i+1;j<8;j++) if(Math.abs(matrix[j][i])>Math.abs(matrix[pivot][i])) pivot=j;
+    if(Math.abs(matrix[pivot][i])<1e-9) return null;
+    [matrix[pivot],matrix[i]]=[matrix[i],matrix[pivot]];
+    const divisor=matrix[i][i];
+    matrix[i]=matrix[i].map(value=>value/divisor);
+    for(let j=0;j<8;j++) if(i!==j){
+      const multiplier=matrix[j][i]; matrix[j]=matrix[j].map((value,k)=>value-multiplier*matrix[i][k]);
+    }
+  }
+  const [a,b,c,d,e,f,g,h]=matrix.map(row=>row[8]);
+  return ([x,y])=>{const w=g*x+h*y+1; return [(a*x+b*y+c)/w,(d*x+e*y+f)/w];};
+}
+
+const width = 1200;
+let height = 675;
+const defaultGuides = [[200, 75], [996, 75], [1010, 600], [220, 600]];
+const mapCorners = [[0, 0], [1, 0], [1, 1], [0, 1]];
+const samples = [[338, 309], [612, 382], [877, 309]];
+const storageKey = "codejam-stable-iphone-corners-v1";
+const camera = document.querySelector(".camera");
+const outline = document.querySelector("#outline");
+const corners = document.querySelector("#corners");
+const map = document.querySelector("#map");
+const status = document.querySelector("#status");
+const framePin = document.querySelector("#frame-pin");
+const cameraFile = document.querySelector("#camera-file");
+const setupFile = document.querySelector("#setup-file");
+const cameraIndex = document.querySelector("#camera-index");
+const exportButton = document.querySelector("#export-corners");
+const sourceImage = document.querySelector("#source-image");
+const sampleButtons = document.querySelectorAll("[data-point]");
+let dimensions = null;
+let frameRequest = 0;
+let fileUrl = null;
+let stableFrame = false;
+let guides = [];
+let project = null;
+let selectedPoint = samples[1];
+let drag = null;
+
+function validGuides(points) {
+  if (!Array.isArray(points) || points.length !== 4 || !points.every(point =>
+    Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)
+    && point[0] >= 0 && point[0] <= width && point[1] >= 0 && point[1] <= height
+  )) return false;
+  return points.every(([ax, ay], index) => {
+    const [bx, by] = points[(index + 1) % 4];
+    const [cx, cy] = points[(index + 2) % 4];
+    return (bx - ax) * (cy - by) - (by - ay) * (cx - bx) > width * height * 1e-4;
+  });
+}
+
+function svg(tag, attributes) {
+  const element = document.createElementNS(camera.namespaceURI, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  return element;
+}
+
+const handles = [..."ABCD"].map((letter, index) => {
+  const handle = svg("g", {
+    class: "corner", tabindex: 0, "data-corner": letter,
+    "aria-label": "Corner " + letter + ". Move with the arrow keys.",
+  });
+  const hitArea = svg("circle", {r: 40, fill: "transparent"});
+  const disc = svg("circle", {class: "corner-disc", r: 17, fill: "#116c5a", stroke: "white", "stroke-width": 3});
+  const label = document.createElementNS(camera.namespaceURI, "text");
+  label.setAttribute("class", "corner-label");
+  label.textContent = letter;
+  handle.append(hitArea, disc, label);
+  handle.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || drag) return;
+    const point = cameraPoint(event);
+    const [x, y] = guides[index];
+    drag = {index, pointerId: event.pointerId, offsetX: point.x - x, offsetY: point.y - y};
+    handle.setPointerCapture(event.pointerId);
+  });
+  handle.addEventListener("keydown", event => {
+    const offsets = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]};
+    if (!Object.hasOwn(offsets, event.key)) return;
+    event.preventDefault();
+    const [dx, dy] = offsets[event.key];
+    const [x, y] = guides[index];
+    const step = event.shiftKey ? 20 : 4;
+    if (moveCorner(index, x + dx * step, y + dy * step)) saveGuides();
+  });
+  corners.append(handle);
+  return handle;
+});
+
+function drawGuides() {
+  outline.setAttribute("points", guides.map(point => point.join(",")).join(" "));
+  outline.setAttribute("visibility", project ? "visible" : "hidden");
+  corners.setAttribute("visibility", guides.length ? "visible" : "hidden");
+  handles.forEach((handle, index) => {
+    const point = guides[index];
+    handle.setAttribute("display", point ? "inline" : "none");
+    if (point) handle.setAttribute("transform", "translate(" + point.join(" ") + ")");
+  });
+  exportButton.disabled = !dimensions || !project || !Number.isSafeInteger(cameraIndex.valueAsNumber)
+    || cameraIndex.valueAsNumber < 0;
+  setupFile.disabled = !dimensions;
+  for (const button of sampleButtons) button.hidden = !stableFrame;
+}
+
+function saveGuides() {
+  if (!stableFrame) return;
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(guides));
+  } catch {
+    // Editing still works for the current tab without local storage.
+  }
+}
+
+function cameraPoint(event) {
+  return new DOMPoint(event.clientX, event.clientY).matrixTransform(camera.getScreenCTM().inverse());
+}
+
+function moveCorner(index, x, y) {
+  if (!project) return false;
+  const updated = guides.slice();
+  updated[index] = [
+    Math.round(Math.max(0, Math.min(width, x))),
+    Math.round(Math.max(0, Math.min(height, y))),
+  ];
+  if (!validGuides(updated)) return false;
+  const updatedProject = transform(updated, mapCorners);
+  if (!updatedProject) return false;
+  guides = updated;
+  project = updatedProject;
+  drawGuides();
+  show(selectedPoint);
+  return true;
+}
+
+function show(point) {
+  selectedPoint = point;
+  if (!project) {
+    map.replaceChildren();
+    framePin.setAttribute("visibility", "hidden");
+    status.textContent = dimensions
+      ? "Click " + "ABCD"[guides.length % 4] + " clockwise from the upper-left."
+      : "Choose the actual detector capture.";
+    return;
+  }
+  const [x, y] = project(point);
+  const inside = [x, y].every(value => value >= 0 && value <= 1);
+  const check = { map_version: "kitchen-v2", map_x: x, map_y: y };
+  const view = inside ? renderKitchenMap(check) : null;
+  map.replaceChildren();
+  if (view) {
+    map.append(view);
+    framePin.setAttribute("cx", point[0]);
+    framePin.setAttribute("cy", point[1]);
+    framePin.setAttribute("visibility", "visible");
+    status.textContent = "";
+  } else {
+    framePin.setAttribute("visibility", "hidden");
+    status.textContent = "Outside the proposed coverage.";
+  }
+}
+camera.addEventListener("pointermove", event => {
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const point = cameraPoint(event);
+  moveCorner(drag.index, point.x - drag.offsetX, point.y - drag.offsetY);
+});
+for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  camera.addEventListener(type, event => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    drag = null;
+    saveGuides();
+  });
+}
+camera.addEventListener("click", event => {
+  if (event.target.closest(".corner")) return;
+  const {x, y} = cameraPoint(event);
+  if (!dimensions || x < 0 || x > width || y < 0 || y > height) return;
+  if (project) {
+    show([x, y]);
+    return;
+  }
+  guides = [...guides, [x, y]];
+  if (guides.length === 4) {
+    project = validGuides(guides) ? transform(guides, mapCorners) : null;
+    if (!project) {
+      guides = [];
+      drawGuides();
+      status.textContent = "Mark a convex floor rectangle clockwise, starting again at A.";
+      return;
+    }
+  }
+  drawGuides();
+  show(selectedPoint);
+});
+document.querySelector("#reset-corners").addEventListener("click", () => {
+  guides = stableFrame ? defaultGuides : [];
+  project = guides.length ? transform(guides, mapCorners) : null;
+  drawGuides();
+  show(selectedPoint);
+  saveGuides();
+});
+for (const button of sampleButtons) {
+  button.addEventListener("click", () => show(samples[Number(button.dataset.point)]));
+}
+
+async function loadFrame(url, useSavedCorners = false) {
+  const request = ++frameRequest;
+  dimensions = null;
+  stableFrame = false;
+  guides = [];
+  project = null;
+  drag = null;
+  sourceImage.removeAttribute("href");
+  setupFile.value = "";
+  drawGuides();
+  show(selectedPoint);
+  const image = new Image();
+  image.src = url;
+  try {
+    await image.decode();
+  } catch {
+    if (request === frameRequest) status.textContent = "Could not open the camera image.";
+    return;
+  }
+  if (request !== frameRequest) return;
+  dimensions = [image.naturalWidth, image.naturalHeight];
+  height = width * dimensions[1] / dimensions[0];
+  camera.setAttribute("viewBox", [0, 0, width, height].join(" "));
+  sourceImage.setAttribute("height", height);
+  sourceImage.setAttribute("href", url);
+  stableFrame = useSavedCorners && dimensions[0] === 1920 && dimensions[1] === 1080;
+  if (stableFrame) {
+    guides = defaultGuides;
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey));
+      if (validGuides(saved)) guides = saved;
+    } catch {
+      // File previews may run with browser storage disabled.
+    }
+    project = transform(guides, mapCorners);
+  }
+  selectedPoint = stableFrame ? samples[1] : [width / 2, height / 2];
+  drawGuides();
+  show(selectedPoint);
+}
+
+cameraFile.addEventListener("change", () => {
+  const file = cameraFile.files[0];
+  if (!file) return;
+  if (fileUrl) URL.revokeObjectURL(fileUrl);
+  fileUrl = URL.createObjectURL(file);
+  void loadFrame(fileUrl);
+});
+cameraIndex.addEventListener("input", drawGuides);
+setupFile.addEventListener("change", async () => {
+  const file = setupFile.files[0];
+  if (!file) return;
+  const request = frameRequest;
+  try {
+    const setup = JSON.parse(await file.text());
+    if (request !== frameRequest) return;
+    if (setup.map_version !== mapVersion || setup.camera_id !== "kitchen-iphone"
+      || setup.dimensions?.length !== 2 || !dimensions.every((value, index) => value === setup.dimensions[index])
+      || !Number.isSafeInteger(setup.source) || setup.source < 0) throw new Error();
+    const points = setup.points.image.map(([x, y]) => [x * width, y * height]);
+    const importedProject = validGuides(points) ? transform(points, mapCorners) : null;
+    if (!importedProject) throw new Error();
+    guides = points;
+    project = importedProject;
+    cameraIndex.value = setup.source;
+    saveGuides();
+    drawGuides();
+    show(selectedPoint);
+  } catch {
+    if (request === frameRequest) status.textContent = "This calibration does not match the current image or kitchen layout.";
+  }
+});
+exportButton.addEventListener("click", () => {
+  const setup = {
+    points: {image: guides.map(([x, y]) => [x / width, y / height])},
+    dimensions,
+    camera_id: "kitchen-iphone",
+    source: cameraIndex.valueAsNumber,
+    map_version: mapVersion,
+  };
+  const blob = new Blob([JSON.stringify(setup, null, 2) + "\n"], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "kitchen-minimap-setup.json";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  status.textContent = "Calibration exported.";
+});
+drawGuides();
+show(selectedPoint);
+if (location.pathname.endsWith("/stable-kitchen-minimap.html")) {
+  void loadFrame("stable-iphone.png", true);
+}
+</script>
+</html>

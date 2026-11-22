@@ -1,3 +1,5 @@
+import { renderKitchenMap } from "./kitchen-map.js";
+
 let audio;
 
 export function unlockAudio() {
@@ -24,7 +26,7 @@ function playAlert() {
   return true;
 }
 
-export function createTakeover({ dialog, place, age, source, accept, dismiss }, onAccept, onDismiss) {
+export function createTakeover({ dialog, place, age, source, map, accept, dismiss }, onAccept, onDismiss) {
   let activeId = null;
   const sounded = new Set();
   const vibrated = new Set();
@@ -37,14 +39,18 @@ export function createTakeover({ dialog, place, age, source, accept, dismiss }, 
   return (check, elapsed, online, pending) => {
     if (!check) {
       activeId = null;
+      map.replaceChildren();
       if (dialog.open) dialog.close();
       return;
     }
     activeId = check.id;
-    place.textContent = check.place;
+    const minimap = renderKitchenMap(check);
+    place.hidden = Boolean(minimap);
+    place.textContent = minimap ? "" : check.place;
     age.textContent = elapsed;
     source.textContent = check.source === "mock" ? "Mock check" : check.source === "replay" ? "Rehearsal clip" : "";
     source.hidden = !source.textContent;
+    map.replaceChildren(...(minimap ? [minimap] : []));
     accept.disabled = !online || pending;
     if (!dialog.open) dialog.showModal();
     if (!sounded.has(activeId) && playAlert()) sounded.add(activeId);

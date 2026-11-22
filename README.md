@@ -19,7 +19,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 ## Pose overlay
 
 ```bash
-.venv/bin/python vision/run.py                               # kitchen phone, camera index 0
+.venv/bin/python vision/run.py --source 0                     # use the index verified by the capture probe
 .venv/bin/python vision/run.py --source clips/lying_down_twice.mp4   # recording (paced at real time)
 ```
 
@@ -29,8 +29,8 @@ Calibrate the floor region once per camera placement (click corners on the first
 .venv/bin/python vision/run.py --source clips/lying_down_twice.mp4 --calibrate
 ```
 
-For the kitchen demo, `vision/run.py` uses camera index `0` when `--source` is omitted. The same
-default applies during floor calibration. Pass `--source` explicitly for another camera or a recording.
+`vision/run.py` uses camera index `0` when `--source` is omitted. Camera indexes can change when
+the phone connects. Verify the image and pass the correct index explicitly for the demo.
 
 Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dropping), `--device cpu`,
 `--constant-fps 30` (files whose decoder reports no usable media timestamps), `--stall-timeout 5`.
@@ -60,6 +60,7 @@ Checks that a camera or clip delivers changing frames, without running the pose 
 ```bash
 .venv/bin/python vision/capture_probe.py --source clips/lying_down_twice.mp4 --frames 30
 .venv/bin/python vision/capture_probe.py --source 0 --frames 120
+.venv/bin/python vision/capture_probe.py --source 0 --frames 30 --snapshot local/kitchen-frame.png
 ```
 
 Use a staged local clip with movement. If the decoder does not expose increasing
@@ -119,6 +120,8 @@ npm ci --prefix frontend
 npm test --prefix frontend
 ```
 
+For the calibration editor browser test, run `npm exec --prefix frontend -- playwright install chromium` and `npm run test:browser --prefix frontend`.
+
 Copy `frontend/.env.example` to `frontend/.env.local`. Set the local Supabase URL and the **publishable** key from the CLI's local status. Run `npm run dev --prefix frontend` and open `http://localhost:5173/?room=codejam-local`. Use two independent browser profiles to exercise simultaneous claims. To verify the packaged frontend, run `npm run build --prefix frontend`.
 
 Set `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in the Mac's shell using the local or hosted project's settings. Then run the publisher or the mock from the repo root.
@@ -141,3 +144,45 @@ python -m pytest -q
 5. If capture fails before creating a check, restart vision with the labeled staged replay. If capture drops after a check exists, continue that check in the room. If internet service fails, use the Flask build from `feat/join-by-name` on a controlled LAN and two independent browser profiles.
 
 Record results in [the rehearsal log](docs/hosted-rehearsal.md).
+
+### Run the full iPhone-to-room pipeline on macOS
+
+The [hosted viewer](https://codejam16-welfare-checks.vercel.app) and Supabase migration are deployed. Run these commands from the repository root. Install Python 3.12 if needed.
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+mkdir -p local
+```
+
+**Verify the camera and calibrate once for this mounting position.** Secure the iPhone in its final overhead position, connect it over USB‑C, and lock it. Quit any earlier detector window with **Q** before probing. Use the captured image to verify the index. If source `0` shows the FaceTime camera, probe source `1` and use the verified index in the editor and launch command.
+
+```bash
+system_profiler SPCameraDataType
+.venv/bin/python vision/capture_probe.py --source 0 --frames 30 --snapshot local/kitchen-frame.png
+open local/kitchen-frame.png
+open tools/kitchen-calibration.html
+```
+
+Load the PNG in the editor. Mark A–D clockwise from the upper-left on four floor-level points that define a 3:2 rectangle. Preview both rehearsal spots by clicking the floor. Set the verified camera index and click **Export calibration**. Save the resulting JSON as `local/kitchen-minimap-setup.json`. If your calibrated export is already in Downloads, copy it into place and adjust the filename if your browser numbered the download.
+
+```bash
+cp ~/Downloads/kitchen-minimap-setup.json local/kitchen-minimap-setup.json
+```
+
+**Run the publishing detector.** Use the hosted project's Supabase server key in the Mac terminal. The prompt hides what you paste.
+
+```bash
+export SUPABASE_URL=https://gbbbvzzeshuafsimtdly.supabase.co
+printf 'Supabase server key: '
+IFS= read -rs SUPABASE_SECRET_KEY
+printf '\n'
+export SUPABASE_SECRET_KEY
+
+.venv/bin/python -u vision/run.py --source 0 --camera-id kitchen-iphone --zone kitchen \
+  --location-calibration local/kitchen-minimap-setup.json --publish
+```
+
+Verify the image and A–D outline in **CodeJam16 pose**, then press **M** to enable minimap dots for that session. Press **U** if the phone moves. Capture and export again after a framing change. Use **Q** or **Ctrl+C** to stop the detector.
+
+**Receive and verify the alert.** Scan the room QR on a phone, join, and keep **Checks** open. Stage one down episode, stand clearly upright for at least two continuous seconds, and stage another at a different spot. A mapped alert shows a red dot on the minimap. Claim it and refresh to verify that the dot stays with the check. An alert without a valid pin shows the place label.

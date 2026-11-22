@@ -18,6 +18,7 @@ async function query(query) {
 }
 
 const fixture = JSON.parse(await readFile(new URL("../../fixtures/person-down.json", import.meta.url)));
+const location = { map_version: "kitchen-v2", map_x: 0.24, map_y: 0.62 };
 const people = [randomUUID(), randomUUID()];
 const runId = `race-${randomUUID()}`;
 try {
@@ -26,7 +27,7 @@ try {
     insert into public.people(id,name) values ('${people[0]}','Ada'), ('${people[1]}','Jordan');
   `);
   for (let index = 0; index < 50; index += 1) {
-    const event = JSON.stringify({ ...fixture, episode_id: `${runId}-${index}` }).replaceAll("'", "''");
+    const event = JSON.stringify({ ...fixture, ...location, episode_id: `${runId}-${index}` }).replaceAll("'", "''");
     const id = await query(`set role service_role; select (public.create_check('${event}')).id;`);
     const contestants = people.map((person) => query(`
       set role authenticated;
@@ -42,8 +43,16 @@ try {
       select count(*) from public.check_events
       where check_id = '${id}' and event = 'accepted';
     `), "1");
+    const snapshots = await Promise.all(people.map(async (person) => JSON.parse(await query(`
+      set role authenticated;
+      set request.jwt.claim.sub = '${person}';
+      select jsonb_build_object('owner_name', item->>'owner_name', 'map_version', item->'map_version',
+          'map_x', item->'map_x', 'map_y', item->'map_y')
+      from jsonb_array_elements(public.room_snapshot()->'checks') item where item->>'id' = '${id}';
+    `))));
+    for (const snapshot of snapshots) assert.deepEqual(snapshot, { owner_name: winners[0].value, ...location });
   }
-  console.log("50/50 races had one winner and one claim history entry.");
+  console.log("50/50 mapped races had one winner, one claim history entry and the original pin in both snapshots.");
 } finally {
   await query(`
     delete from public.check_events where check_id in (select id from public.checks where episode_id like '${runId}-%');

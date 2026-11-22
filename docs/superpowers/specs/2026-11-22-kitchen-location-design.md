@@ -1,46 +1,25 @@
 # Fixed-Camera Kitchen Location Design
 
-Written 22 Nov 2026. Planning artifact for the hosted demo on merged `main` (`acdefe3`).
+## Goal
 
-## Intent
+Show an approximate top-down position for a simulated or detected person on the visible kitchen floor. Use relative coordinates and show the detected position as a red dot on the responder minimap.
 
-When the fixed kitchen camera confirms a possible person down, the hosted check should show an approximate position on a simple top-down kitchen layout. Responders should see a pin and a useful place label, such as “Near the counter.” The video and pose overlay stay on the Mac.
+## Camera position
 
-## Decisions and approaches
+Use the fixed overhead iPhone view tested at 1920 × 1080. The visible left wall and right-side chair orient the map. Use those same sides in the capture and the viewer. Check that shoulders and hips are visible while down and that a clearly upright pose can rearm the detector.
 
-The user chose **one-time manual calibration**. With the camera mounted in its filming position, the operator identifies matching fixed, floor-level points in a camera frame and the 2D layout. The result is saved locally and loaded at every launch. Moving or reframing the camera requires recalibration.
+## Use the floor as the reference
 
-| Approach | Trade-off |
-| --- | --- |
-| One-time point correspondence and planar homography **(chosen)** | Small setup task, deterministic, no model training. Works while the camera and kitchen stay fixed. |
-| Automatic landmark matching at each launch | Needs reliable recognition and identity matching of the same physical counter ends and other fixtures. More code and rehearsal risk for this fixed-camera demo. |
-| Hand-assigned broad zones | Easy to wire but cannot put a meaningful pin on a measured 2D layout. |
+Choose four visible floor-level points that form a 3:2 rectangle across the open floor. A known floor pattern or tape points can establish the proportions without measurements in metres. Start at the upper-left of the overhead frame (A), then upper-right (B), lower-right (C), and lower-left (D). Project the corners to the unit square and draw the minimap in the rectangle's proportions.
 
-The counter and other fixed kitchen features define the layout and give recognizable calibration references. Points used to solve the camera-to-map transform must lie on the **floor plane**: counter base corners, tile intersections, and a doorway threshold work; the top of a counter does not. Record at least five well-spread, non-collinear correspondences, using at least four to fit and a separate point to check accuracy. Visible permanent features are preferred; temporary floor marks may be used during setup if natural points are hard to click precisely.
+Check the projection using an independent interior floor point. The stable frame has one tape mark near the center that can serve as a check. Keep the exact coverage provisional until A–D are verified.
 
-## Data flow
+## Draw the minimap from the calibrated area
 
-1. Store the measured kitchen footprint, counter footprint, landmark names and floor coordinates in one versioned layout file, in metres. The same file is read by the calibration tool and hosted frontend. The actual layout measurements and camera frame must come from the demo kitchen before final calibration.
-2. A local calibration tool pauses on a camera frame, asks the operator to click each configured floor landmark, calculates an image-to-floor homography, checks the held-out point and saves the camera ID, source aspect ratio, layout version, points and matrix to `local/`. It never uploads the frame.
-3. On a confirmed down episode, use the center of the detected person’s shoulder and hip midpoints as an approximate floor contact location. The existing detector already chooses the down person for the event. Project that image point into kitchen metres. Only attach coordinates when calibration is valid and the point is inside the mapped walkable floor. Otherwise, emit the original event without coordinates.
-4. Add optional `map_x_m`, `map_y_m`, `location_label`, and `layout_version` fields to the check. `create_check` stores them on first insertion and retains them on duplicate `episode_id`. Existing checks and mock events without location continue to work.
-5. Show the static kitchen outline, the counter and a pin in the hosted check row and alert takeover. Display the stored label alongside it. If no coordinates exist, show the existing `place` text without an empty map.
+Draw the wall as a line to the left of the covered area and the chair as a small landmark to its right. Use unlabeled landmarks to keep the viewer oriented in the same direction as the iPhone frame. Let the red dot convey the location in the alert and check row.
 
-OpenCV’s `findHomography` computes the projective transform and `perspectiveTransform` applies it. The map pin is an estimate, because pose keypoints are not exact floor contacts. No per-frame cloud calls, new recognition model, or raw imagery are required.
+In simulation mode, clicking the source frame projects a sample pin and leaves the hosted database untouched. In live mode, use the midpoint between the selected person's shoulder and hip midpoints on the confirming frame as an estimate. Render a pin only inside the calibrated area and keep the plain alert label when a pin cannot be placed.
 
-## Boundaries and acceptance
+## Acceptance
 
-- Python 3.12 and existing pinned OpenCV/Numpy versions; static Vite frontend and hosted Supabase Postgres remain the stack.
-- Calibration is local and specific to one camera position, orientation and image crop. Different image resolutions with the same aspect ratio can rescale normalized image points; rotation or a different crop invalidates the calibration.
-- For this kitchen setup, camera source `0` is the mounted phone and is the default for detector and map calibration runs. Other sources remain selectable explicitly.
-- A bad or missing calibration produces a plain place label and a visible local warning. It must never create a misleading map pin.
-- Keep frames, reference stills, local calibration data and camera recordings out of Git. Commit only the kitchen layout geometry and tests.
-- For the filmed demo, rehearse two different floor positions with a fixed camera. In each case the pin should land within approximately 1 metre of the measured position and on the correct side of the counter. Rearm the detector with at least 2 continuous seconds of clearly upright posture between episodes. The two checks should appear on joined phones and retain their pins through refresh and claim.
-- If the counter hides the person’s torso or the camera misses the floor landmarks, reposition the camera before calibrating. The math cannot recover a floor location from an invisible person.
-
-## Inputs still needed at rehearsal
-
-- A rough top-down kitchen sketch with room and counter dimensions in metres, including the locations of five or more visible floor-level landmarks.
-- A camera still from the final mounted position and two known person-down rehearsal spots for validation.
-
-These are setup inputs, not reasons to block the code plan. The implementation should include a documented procedure for filling them in once the kitchen is available.
+Choose two floor spots well apart, one toward the wall and one toward the chair. Preview both with clicks, then rehearse with the fixed camera and the existing detector. The map should show the right zone and order for both spots, and the detector should still confirm each staged episode and rearm between them. If the phone shifts or its framing changes, realign the calibration before filming. Camera metadata alone cannot detect physical movement.
