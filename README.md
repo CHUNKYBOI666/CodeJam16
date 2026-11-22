@@ -5,6 +5,12 @@ Pose detection runs on a laptop, so video never leaves it. Staff phones get one 
 
 <img src="docs/screenshots/hosted-alert.png" alt="Spotter alert on a phone: Possible person down, Near the stage, Accept" width="260">
 
+
+
+https://github.com/user-attachments/assets/d4484a54-d3db-4ce9-9bf5-fe2b5412ae55
+
+
+
 Built for McGill CodeJam 16. Live app: <https://codejam16-welfare-checks.vercel.app> (join with the room QR).
 
 ## Why this matters
