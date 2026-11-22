@@ -4,16 +4,24 @@
 
 **Goal:** Get all existing work onto `main`, connect camera → detector → incident store → staff screens, prove it with tests, detector evidence and rehearsals, and demo it in 18 hours.
 
-**Architecture:** One Flask process on the Mac. A daemon worker thread runs `PersonDownPipeline` (capture + YOLO26n-pose + `PersonDownDetector`) and delivers confirmed events to `IncidentStore.create_incident`. A thread-safe `FeedState` object is shared with `/api/state`. `config/venue.json` is the single source of truth for zones, map pins and detector thresholds.
+**Architecture:** One Flask process on the Mac. A daemon worker thread runs the `vision/` loop (`FrameSource` + YOLO26n-pose + `PersonDownDetector` + `alert_event`) and delivers confirmed events to `IncidentStore.create_incident`. A thread-safe `FeedState` object is shared with `/api/state`. `config/venue.json` is the single source of truth for zones and map pins. Detector thresholds live in `vision/config.py`.
 
-**Tech Stack:** Python 3.12 (`uv`), Flask 3, SQLite, OpenCV, Ultralytics YOLO26n-pose, `unittest`, vanilla JS.
+**Tech Stack:** Python 3.12 (`uv`), Flask 3, SQLite, OpenCV, Ultralytics YOLO26n-pose, `pytest`, vanilla JS.
 
 **Spec:** [docs/superpowers/specs/2026-11-21-codejam16-finish-and-demo-design.md](../specs/2026-11-21-codejam16-finish-and-demo-design.md). Product behaviour: [engineering plan](../../designs/live-venue-welfare-checks.md). UI: [locked mockup](../../mockups/staff-app.html). Demo script and fallback table: [BUILD-MAP §5](../../BUILD-MAP.md).
 
+> **Computer vision is now owned by David in `vision/`** (see the [handoff](../../implementation-handoff.md)). The old CV code (`src/codejam16/capture.py`, `capture_cli.py`, `detector.py`, `pipeline.py`, `pose_trace.py`, `posec3d_cli.py`, `vision_cli.py`) and the PoseC3D experiment are retired, and the tasks that built on them are removed or rewritten against `vision/`. What `vision/` provides to the rest of the app:
+>
+> - `vision/capture.py`: `FrameSource(camera_index_or_path)` with `.wait_ready()`, `.start()`, `.latest() -> Frame | None` (newest frame only, media timestamps for files) and typed failures `CaptureOpenError`, `LiveFeedLost`, `CaptureReadError`.
+> - `vision/pose.py`: `load_model(weights)`, `warm_up(...)`, `predict(...)`, `people_from_result(result) -> list[Person]`.
+> - `vision/detector.py`: `PersonDownDetector(floor_polygon=..., frame_size=...)`, `.update_people(ts_ms, people) -> Status` (`status.alert` once per episode), `.reset()`, and `alert_event(alert, camera_id=, zone_id=, source=, detected_at=)`, which returns the `fixtures/person-down.json` fields.
+> - `vision/run.py`: live or replay with overlay; prints each alert to stdout as one JSON line (`--camera-id`, `--zone-id`).
+> - Thresholds live in `vision/config.py`; the floor region in `local/calibration.json` (`vision/run.py --calibrate`).
+
 ## Global Constraints
 
-- Python 3.12 via `uv`. Pins: `Flask>=3.0,<4.0`, `ultralytics==8.4.216`, `opencv-python==5.1.0.95`, `torch==2.15.0`, `torchvision==0.29.2`. PoseC3D deps go only in `requirements-posec3d.txt`.
-- Test command (must stay green on every merge): `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`. No test may load YOLO weights or open a camera.
+- Python 3.12 via `uv`. Pins: `Flask>=3.0,<4.0`, `ultralytics==8.4.216`, `opencv-python==5.1.0.95`, `torch==2.15.0`, `torchvision==0.29.2`.
+- Test command (must stay green on every merge): `.venv/bin/python -m pytest -q` (`pytest.ini` puts `vision` and `src` on the path; it also runs `unittest`-style tests). No test may load YOLO weights or open a camera.
 - Zone IDs: `east-bar` (East bar · Beside the side stairs, the live camera) and `main-floor` (Main floor · Near the north tables, labelled sample only).
 - Signal label: **Possible person down**. Outcomes, exact strings: `Confirmed person down`, `False alarm`, `Couldn't verify`.
 - Statuses `needs_responder → accepted → arrived → resolved`. UI words: "Needs responder", **"Being resolved"** (accepted and arrived, teal), **"Closed"** (resolved, history only).
@@ -37,36 +45,40 @@
 | File | Responsibility | Task |
 | --- | --- | --- |
 | `local/cleanup.sh` | One-shot repo reorganization | 2 |
-| `requirements.txt`, `requirements-posec3d.txt`, `README.md` | Environment and quick start | 4 |
+| `requirements.txt`, `README.md` | Environment and quick start | 4 |
 | `config/venue.json`, `src/codejam16/venue.py`, `tests/test_venue.py` | Zones, map pins, camera thresholds | 5 |
 | `src/codejam16/live.py`, `tests/test_live.py` | `FeedState` and `DetectorWorker` (failure policy, retry, fps) | 6 |
 | `src/codejam16/web/app.py`, `tests/test_web.py` | Feed and zones in snapshot, launch flags, worker start | 7, 10 |
 | `src/codejam16/store.py`, `tests/test_store.py` | Demo seed, store guarantees | 9, 11 |
 | `src/codejam16/web/static/staff.js`, `templates/app.html`, `static/staff.css` | Mockup states, config-driven pins, latency/fps | 11 |
-| `src/codejam16/vision_cli.py`, `src/codejam16/pipeline.py`, `tests/test_detector.py` | Pose trace kept, venue thresholds, already-down test | 3, 12 |
+| `vision/`, `tests/vision/` | Capture, pose, detector, calibration, overlay, clip evaluation (David) | 13, 14 |
 | `docs/detector-results.md`, `docs/rehearsal-log.md` | Evidence | 13–16 |
 
 ## Lanes and timeline
 
-| Hours | D (detector) | S (staff app, Nicolas) | C (capture/integration) |
+| Hours | D (vision/, David) | S (staff app, Nicolas) | C (integration) |
 | --- | --- | --- | --- |
 | H0–1 | Prep the clip list and mount, Task 13 step 1 | Read the mockup diff | Tasks 1–3 |
 | H1–2 | Task 13 (record) | Task 9 | Task 4 |
 | H2–5 | Task 13 (calibrate) | Tasks 10, 11 | Tasks 5, 6 |
-| H5–7 | Task 12, Task 14 | Task 11 | Tasks 7, 8 |
+| H5–7 | Task 14 | Task 11 | Tasks 7, 8 |
 | **H7** | **Checkpoint:** Tasks 1–12 merged, replay end-to-end passes Task 8 | | |
 | H7–10 | Retune if needed | Task 15 | Task 15, optional Task 17 |
 | H10–12 | Task 16 rehearsal 1, fixes | | |
 | **H12** | **Code freeze** | | |
 | H12–18 | Sleep in shifts. Task 16 rehearsals 2–3 at ~H15–16. Venue pass at ~H17. | | |
 
-If behind at H7, drop in this order: screenshots (Task 11 step 6), the PoseC3D README section, then the optional rearm demo step. Never drop Tasks 9, 10, 13 or the fallback path.
+If behind at H7, drop in this order: screenshots (Task 11 step 6), then the optional rearm demo step. Never drop Tasks 9, 10, 13 or the fallback path.
 
 ---
 
 ## Phase R: Reorganize (C, H0–1)
 
-### Task 1: Rescue the uncommitted pipeline work
+### Task 1: Rescue the uncommitted pipeline work (removed)
+
+Removed: the `pipeline.py`/`vision_cli.py` work it rescued is retired. Computer vision lives in `vision/`. The original steps are kept below for the record only; don't run them.
+
+<details><summary>Original steps</summary>
 
 **Files:** `~/Desktop/codejam16-live` (worktree on `team/live-person-down`, mid-merge of `team/detector` into `team/integration`)
 
@@ -84,6 +96,8 @@ git push origin HEAD:feat/live-pipeline
 
 Expected: `origin/feat/live-pipeline` exists. **Do not run `merge --abort` anywhere before this push succeeds.**
 
+</details>
+
 ### Task 2: Run the cleanup script
 
 **Files:** Modify `local/cleanup.sh`
@@ -100,14 +114,23 @@ Expected: `origin/feat/live-pipeline` exists. **Do not run `merge --abort` anywh
 ### Task 3: Land existing branches on `main`
 
 **Interfaces:**
-- Produces: `main` containing `capture.py`, `detector.py`, `pipeline.py`, `pose_trace.py`, `posec3d_cli.py`, `vision_cli.py` (pipeline-based, with `--pose-trace`), `store.py` and `web/`.
-- Produces: `PersonDownPipeline(predict_pose, *, camera_id, zone_id, floor_box, confirmation_seconds=2.0, rearm_seconds=2.0, maximum_observation_gap_ms=500, minimum_keypoint_confidence=0.4, down_angle_degrees=30, upright_angle_degrees=60, observe_pose=None)`. `observe_pose` is new and is passed through to `PersonDownDetector`.
+- Produces: `main` containing `vision/` (capture + detector, see the note at the top), `store.py` and `web/`.
 
 One PR per branch, in this order. Each PR body states the test command output.
 
-- [ ] **Step 1: Land `team/detector-posec3d`.** Branch `merge/detector` off `main` and `git merge origin/team/detector-posec3d`. README conflict: keep both sections and title the PoseC3D section "PoseC3D experiment (not in demo)". Run the tests and expect OK. Open a PR and merge it.
-- [ ] **Step 2: Land `feat/live-pipeline`.** Branch `merge/pipeline` off `main` and `git merge origin/feat/live-pipeline`. In the `vision_cli.py` conflict, take the pipeline version. In the `README.md` conflict, keep all sections.
-- [ ] **Step 3: Write the failing test** in `tests/test_pipeline.py`:
+- [ ] **Step 1: Land `team/vision`.** Open a PR from `team/vision` into `main`. Run the tests and expect OK. Merge it.
+- [ ] **Step 2: Land `team/staff-app`.** Branch `merge/staff-app`, merge it, and keep all README sections. Delete its copies of `src/codejam16/capture.py`, `capture_cli.py` and `tests/test_capture.py`; `vision/capture.py` replaces them. Run the tests and expect OK. Open a PR and merge it.
+- [ ] **Step 3: Delete merged remote branches.**
+
+```bash
+git push origin --delete team/vision team/cv team/staff-app
+```
+
+<details><summary>Removed steps (old CV branches, retired)</summary>
+
+- **Land `team/detector-posec3d`.** Branch `merge/detector` off `main` and `git merge origin/team/detector-posec3d`. README conflict: keep both sections and title the PoseC3D section "PoseC3D experiment (not in demo)". Run the tests and expect OK. Open a PR and merge it.
+- **Land `feat/live-pipeline`.** Branch `merge/pipeline` off `main` and `git merge origin/feat/live-pipeline`. In the `vision_cli.py` conflict, take the pipeline version. In the `README.md` conflict, keep all sections.
+- **Write the failing test** in `tests/test_pipeline.py`:
 
 ```python
 def test_observe_pose_receives_every_frame(self):
@@ -121,14 +144,10 @@ def test_observe_pose_receives_every_frame(self):
 ```
 
 Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_pipeline -v`. Expected: FAIL with an unexpected keyword `observe_pose`.
-- [ ] **Step 4: Implement.** Add `observe_pose=None` to `PersonDownPipeline.__init__` and pass it to every `PersonDownDetector(...)` it constructs. Restore the `--pose-trace PATH` flag in `vision_cli.py` from the detector-posec3d version: open the file with mode `"x"`, wrap it in `PoseTrace`, and pass it as `observe_pose`.
-- [ ] **Step 5: Run all tests.** Expected: OK with 49 or more tests. Commit `"Land live pipeline and keep pose trace"`, open a PR and merge it.
-- [ ] **Step 6: Land `team/staff-app`.** Branch `merge/staff-app`, merge it, and keep all README sections. Run the tests and expect OK. Open a PR and merge it.
-- [ ] **Step 7: Delete merged remote branches.**
+- **Implement.** Add `observe_pose=None` to `PersonDownPipeline.__init__` and pass it to every `PersonDownDetector(...)` it constructs. Restore the `--pose-trace PATH` flag in `vision_cli.py` from the detector-posec3d version: open the file with mode `"x"`, wrap it in `PoseTrace`, and pass it as `observe_pose`.
+- **Run all tests**, commit `"Land live pipeline and keep pose trace"`.
 
-```bash
-git push origin --delete team/integration team/detector team/detector-posec3d team/staff-app feat/live-pipeline
-```
+</details>
 
 **Gate H1:** a fresh `git clone` of `main` passes the test command.
 
@@ -138,14 +157,14 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
 
 ### Task 4: One environment and quick start
 
-**Files:** Modify `requirements.txt`, `README.md`. Create `requirements-posec3d.txt`.
+**Files:** Modify `requirements.txt`, `README.md`.
 
-- [ ] **Step 1: Write the requirements files.** `requirements.txt` contains exactly the five Global Constraints pins. `requirements-posec3d.txt` contains the PoseC3D pin list from the current README.
+- [ ] **Step 1: Write the requirements files.** `requirements.txt` contains exactly the five Global Constraints pins, plus `pytest`.
 - [ ] **Step 2: Rewrite the top of README** as "Quick start" with three blocks: setup, test and launch.
-  - Setup: `uv venv --python 3.12 .venv`, then `uv pip install --python .venv/bin/python -r requirements.txt`, then the `curl` command for `local/yolo26n-pose.pt`, then `cp ~/Downloads/laydown.MOV local/laydown.MOV`.
+  - Setup: `uv venv --python 3.12 .venv`, then `uv pip install --python .venv/bin/python -r requirements.txt`, (the pose weights download to `local/weights/` on the first `vision/` run), then `cp ~/Downloads/laydown.MOV local/laydown.MOV`.
   - Test: the Global Constraints test command.
   - Launch: the Task 7 commands.
-  - Move the detector, capture and PoseC3D sections below it unchanged.
+  - Keep the `vision/` sections below it unchanged.
 - [ ] **Step 3: Verify from a fresh clone.** In a temp dir: clone, run setup, run tests. Expected: OK.
 - [ ] **Step 4: Commit** `"Pin one 3.12 environment and add quick start"`, open a PR and merge it.
 
@@ -160,7 +179,7 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
 **Interfaces:**
 - Produces: `load_venue(path: str | Path) -> Venue`
 - Produces: `Venue.zones: dict[str, Zone]` and `Venue.cameras: dict[str, Camera]`
-- Produces: `Zone(zone_id, name, landmark, map_x, map_y)` and `Camera(camera_id, zone_id, floor_box: tuple[float, float, float, float], detector: dict)`. `detector` holds the `PersonDownDetector` keyword thresholds.
+- Produces: `Zone(zone_id, name, landmark, map_x, map_y)` and `Camera(camera_id, zone_id)`. The floor region and detector thresholds are not in the venue config: they live in `local/calibration.json` and `vision/config.py`.
 - Produces: `Venue.zone_for_camera(camera_id) -> Zone`
 - Produces: `Venue.to_public() -> list[dict]`, the zones for the browser (id, name, landmark, map_x, map_y).
 
@@ -173,13 +192,7 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
     "main-floor": {"name": "Main floor", "landmark": "Near the north tables", "map_x": 592, "map_y": 274}
   },
   "cameras": {
-    "demo-camera": {
-      "zone_id": "east-bar",
-      "floor_box": [0.10, 0.62, 0.95, 0.98],
-      "detector": {"confirmation_seconds": 2.0, "rearm_seconds": 2.0,
-                   "down_angle_degrees": 30, "upright_angle_degrees": 60,
-                   "minimum_keypoint_confidence": 0.4, "maximum_observation_gap_ms": 500}
-    }
+    "demo-camera": {"zone_id": "east-bar"}
   }
 }
 ```
@@ -187,11 +200,10 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
 - [ ] **Step 1: Write failing tests:**
   - `test_loads_repo_config`: `load_venue("config/venue.json").zone_for_camera("demo-camera").name == "East bar"`.
   - `test_unknown_camera_zone_rejected`: a temp config whose camera `zone_id` is `"nowhere"` raises `ValueError` with "nowhere" in the message.
-  - `test_bad_floor_box_rejected`: `[0.9, 0.6, 0.1, 0.98]` raises `ValueError`.
   - `test_to_public_lists_both_zones`: the ids are `{"east-bar", "main-floor"}`.
 - [ ] **Step 2: Run `python -m unittest tests.test_venue -v`.** Expected: FAIL (no module).
-- [ ] **Step 3: Implement `venue.py`** with frozen dataclasses and `json.load`. Validate that the camera zone exists and that the floor box satisfies `0 <= left < right <= 1` and `0 <= top < bottom <= 1`.
-- [ ] **Step 4: Run all tests.** Expected: OK. `test_pipeline`'s fixture-keys check still passes because only the value changed.
+- [ ] **Step 3: Implement `venue.py`** with frozen dataclasses and `json.load`. Validate that the camera zone exists.
+- [ ] **Step 4: Run all tests.** Expected: OK. `tests/vision/test_detector.py`'s fixture check still passes: it reads the ids from the fixture.
 - [ ] **Step 5: Commit** `"Add venue config as single source of zones and thresholds"`, open a PR and merge it.
 
 ### Task 6: Detector worker and feed state
@@ -199,9 +211,9 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
 **Files:** Create `src/codejam16/live.py`, `tests/test_live.py`.
 
 **Interfaces:**
-- Consumes: `PersonDownPipeline` (Task 3), `capture.open_camera(index, *, stall_timeout_seconds)`, `capture.open_replay(path, *, constant_fps=None)`, `CaptureError`, `DeliveryError`, `Venue` and `Camera` (Task 5), and `IncidentStore.create_incident(event) -> dict`.
+- Consumes: `vision/capture.py` (`FrameSource`, `CaptureError`, `CaptureOpenError`, `LiveFeedLost`), `vision/pose.py` (`load_model`, `warm_up`, `predict`, `people_from_result`), `vision/detector.py` (`PersonDownDetector`, `alert_event`), `load_floor_polygon` from `vision/calibration.py`, `Venue` and `Camera` (Task 5), and `IncidentStore.create_incident(event) -> dict`. Agree this interface with David (`vision/` owner) before starting.
 - Produces: `FeedState()` with `.update(**fields) -> None` and `.snapshot() -> dict`. It is lock-protected and the snapshot always contains `status`, `label`, `detail`, `source`, `fps` (float) and `last_frame_at` (ISO or None).
-- Produces: `DetectorWorker(*, venue: Venue, camera_id: str, deliver: Callable[[dict], dict], feed: FeedState, load_predictor: Callable[[], Callable], camera_index: int | None = None, replay_path: Path | None = None, fallback_clip: Path | None = None, open_camera=capture.open_camera, open_replay=capture.open_replay, delivery_attempts: int = 5)`
+- Produces: `DetectorWorker(*, venue: Venue, camera_id: str, deliver: Callable[[dict], dict], feed: FeedState, load_predictor: Callable[[], Callable], camera_index: int | None = None, replay_path: Path | None = None, fallback_clip: Path | None = None, open_source=FrameSource, delivery_attempts: int = 5)`
 - Produces: `.run() -> None` (blocking) and `.start() -> threading.Thread` (a daemon thread named `detector-worker`).
 - Behaviour:
   - Before delivery, the worker enriches each event with `zone_name` and `landmark` from the venue.
@@ -217,7 +229,7 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
 | Camera lost after a check was delivered, or fallback failed | `offline` | `Camera offline` |
 | Replay ended normally | `finished` | `Rehearsal clip ended` |
 
-- [ ] **Step 1: Write failing tests** with a fake predictor (`lambda frame: frame.results`) and fake openers. A fake opener is a context manager yielding `CapturedFrame` lists built with `test_detector`'s `DOWN`, `UPRIGHT` and `SITTING`. For live loss, it raises `LiveFeedLost` after the list.
+- [ ] **Step 1: Write failing tests** with a fake predictor that returns `Person` lists built like the `person(...)` helper in `tests/vision/test_detector.py` (lying, standing, sitting), and a fake `open_source` whose `.latest()` returns frames from a list. For live loss, `.latest()` raises `LiveFeedLost` after the list.
   - `test_replay_creates_one_enriched_check`: replay of DOWN 0–3000 ms. `deliver` is called once with `zone_id == "east-bar"` and `zone_name == "East bar"`, and the final feed status is `finished`.
   - `test_pre_check_loss_uses_fresh_pipeline`: live DOWN 0–1500 ms then loss, with a fallback of DOWN 0–1000 ms. Expect **zero** deliveries (the 1.5 s of evidence did not carry over) and a final status of `finished`.
   - `test_pre_check_loss_fallback_detects`: live SITTING then loss, with a fallback of DOWN 0–3000 ms. Expect one delivery whose event has `source == "replay"`.
@@ -228,12 +240,12 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
   - `test_fps_reported`: after a replay of 10 frames, `feed.snapshot()["fps"] > 0` and `last_frame_at` ends with `Z`.
 - [ ] **Step 2: Run `python -m unittest tests.test_live -v`.** Expected: FAIL (no module).
 - [ ] **Step 3: Implement `live.py`.**
-  - The worker opens sources itself through the injected `open_camera`/`open_replay` and calls `pipeline.run(frames, source=..., deliver=...)`. It does **not** use `pipeline.run_camera`/`run_replay`, which hardcode the capture module.
-  - Live capture already keeps only the newest frame (`_LiveCamera._pending`), so BUILD-MAP 1.3 needs no work.
-  - `run()` loads the predictor once. It builds a `PersonDownPipeline` from `venue.cameras[camera_id]` (floor_box plus the `detector` dict).
+  - The worker opens sources itself through the injected `open_source`, then loops: `frame = src.latest()` → `people_from_result(predict(...))` → `detector.update_people(frame.ts_ms, people)`. On `status.alert` it builds the event with `alert_event(...)` (zone from the venue) and delivers it.
+  - Live capture already keeps only the newest frame (`vision/capture.py`), so BUILD-MAP 1.3 needs no work.
+  - `run()` loads the model once and warms it up at the source frame size. It builds a `PersonDownDetector` with the calibrated floor region (`local/calibration.json`).
   - It runs live if `camera_index` is set, otherwise replay.
-  - On `CaptureError` from live: if `pipeline.event_emitted` is true, go `offline`. Otherwise build a **new** pipeline and run the fallback.
-  - On `DeliveryError`: `pipeline.run` has stopped mid-iteration. Retry `pipeline.deliver_pending(deliver)` up to `delivery_attempts` times with a 0.2 s sleep, then call `pipeline.run` again with the **same** frames iterator to resume. If every attempt fails, set status `offline` with detail `Could not save check` and return. Replace the sleep with a no-op in tests through a `sleep` keyword argument.
+  - On `CaptureError` from live: if a check was already delivered from this source, go `offline`. Otherwise build a **new** `PersonDownDetector` and run the fallback.
+  - If delivery fails: retry delivering the same event (same `episode_id`) up to `delivery_attempts` times with a 0.2 s sleep, then keep reading frames. If every attempt fails, set status `offline` with detail `Could not save check` and return. Replace the sleep with a no-op in tests through a `sleep` keyword argument.
   - Every exception path ends in a feed status from the table. The thread never dies silently.
 - [ ] **Step 4: Run all tests.** Expected: OK.
 - [ ] **Step 5: Commit** `"Add detector worker with feed state and capture failure policy"`, open a PR and merge it.
@@ -248,8 +260,8 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
   - `venue` defaults to `load_venue(<repo>/config/venue.json)`.
   - `feed` defaults to a `FeedState` with status `rehearsal`, label `Rehearsal mode`.
 - Produces: `/api/state` includes `"feed": feed.snapshot()` and `"zones": venue.to_public()`.
-- Produces: launch flags in `main()`: `--camera-index N | --replay PATH | --no-detector` (mutually exclusive, default `--no-detector`), `--fallback-clip PATH`, `--venue PATH`, `--camera-id demo-camera`, `--weights local/yolo26n-pose.pt`.
-- `main()` builds the app, then (unless `--no-detector`) starts exactly one `DetectorWorker` with `deliver=store.create_incident` and `load_predictor=functools.partial(vision_cli._load_pose_predictor, weights)`. It then runs `app.run(..., use_reloader=False)`.
+- Produces: launch flags in `main()`: `--camera-index N | --replay PATH | --no-detector` (mutually exclusive, default `--no-detector`), `--fallback-clip PATH`, `--venue PATH`, `--camera-id demo-camera`, `--weights` (default: `vision/`'s cached `local/weights/yolo26n-pose.pt`).
+- `main()` builds the app, then (unless `--no-detector`) starts exactly one `DetectorWorker` with `deliver=store.create_incident` and `load_predictor=functools.partial(load_model, weights)` (`load_model` from `vision/pose.py`). It then runs `app.run(..., use_reloader=False)`.
 - `create_app` itself never starts a worker, so tests and module import stay camera-free.
 
 - [ ] **Step 1: Write failing tests** with a client logged in through `/join/responder-ada` (POST):
@@ -266,7 +278,7 @@ git push origin --delete team/integration team/detector team/detector-posec3d te
 - [ ] **Step 2: Open the views.** Open `/join/supervisor-morgan` and `/join/responder-ada` in two Chrome profiles.
 - [ ] **Step 3: Check the result.** Expected:
   - Exactly one new "Possible person down · East bar" check appears.
-  - The East bar pin appears within 2 s of the stderr `Confirmed …` line.
+  - The East bar pin appears within 2 s of the detector's alert log line.
   - The pill reads Rehearsal clip, then Rehearsal clip ended.
   - The fps shows about 12 or higher.
 - [ ] **Step 4: Run a live check.** Relaunch with `--camera-index N --fallback-clip local/laydown.MOV`. Cover or stop the camera before anyone lies down. Expected: it switches to Rehearsal clip and one check appears. Then relaunch, let a check appear live, and kill the camera. Expected: Camera offline, and the check stays actionable.
@@ -341,22 +353,13 @@ Helper: `join(client, token)` posts `/join/<token>` and returns the CSRF token f
 
 ## Phase 4: Detector validation (D + a consenting actor)
 
-### Task 12: Thresholds from config, plus the already-down test
+### Task 12: Thresholds from config, plus the already-down test (removed)
 
-**Files:** Modify `src/codejam16/vision_cli.py`, `tests/test_detector.py`.
-
-**Interfaces:** Consumes `load_venue` and `Camera` (Task 5). Produces `vision_cli --venue config/venue.json --camera-id demo-camera`, which takes floor_box and thresholds from the config. Explicit `--floor-box` and threshold flags still override it.
-
-- [ ] **Step 1: Write the failing tests.**
-  - `test_already_down_at_startup_alerts_once` in `test_detector.py`: DOWN frames from 0 to 6000 ms every 500 ms produce exactly 1 event.
-  - `test_vision_cli_reads_venue`: `vision_cli._parse_args(["x.mp4", "--venue", "config/venue.json"])`, resolved through the new helper `_detector_options(args) -> dict`, returns `floor_box == (0.10, 0.62, 0.95, 0.98)` and `zone_id == "east-bar"`.
-- [ ] **Step 2: Run them.** Expected: the first likely PASSES (the behaviour already exists, so the test just pins it). The second FAILS.
-- [ ] **Step 3: Implement `_detector_options`.** Start from the venue camera, then apply CLI overrides on top.
-- [ ] **Step 4: Run all tests.** Expected: OK. Commit `"Read detector thresholds from venue config"`, open a PR and merge it.
+Removed: detector thresholds live in `vision/config.py`, the floor region in `local/calibration.json`, and `tests/vision/test_detector.py` already covers "already down at startup".
 
 ### Task 13: Record clips and calibrate
 
-**Files:** Create `docs/detector-results.md`. Modify `config/venue.json` (floor_box and thresholds). Clips go in `local/clips/` and are never committed.
+**Files:** Create `docs/detector-results.md`. Modify `vision/config.py` only if thresholds change. Clips go in `local/clips/A/` (tuning) and `local/clips/B/` (checking) and are never committed.
 
 - [ ] **Step 1: Mount the camera iPhone** at the demo-day height and angle, with the floor area and actor fully in frame and the audience framed out.
 - [ ] **Step 2: Record about 10 s clips** in two takes each, A for tuning and B for checking:
@@ -367,24 +370,24 @@ Helper: `join(client, token)` posts `/join/<token>` and returns the CSRF token f
 | `lie-down-stay` (lower safely, stay 10 s) | 1 |
 | `start-down` (already lying when the clip starts) | 1 |
 | `down-up-down` (down 5 s, stand 5 s, down 5 s) | 2 |
-| `two-people` (bystander enters before confirmation) | 0, with unknown frames reported |
+| `two-people` (bystander walks past while the actor lies down) | 1 (`vision/` counts the frame as down if anyone is down) |
 
-- [ ] **Step 3: Calibrate the floor box.** Grab one frame with `ffmpeg -i local/clips/lie-down-stay-A.mov -frames:v 1 local/frame.png`, read off the floor rectangle as fractions of width and height, and write it into `config/venue.json`.
+- [ ] **Step 3: Calibrate the floor region.** Run `.venv/bin/python vision/run.py --source local/clips/A/lie-down-stay.mov --calibrate`, click the floor corners and press Enter. It saves to `local/calibration.json`.
 - [ ] **Step 4: Run every A clip.**
 
 ```bash
-for f in local/clips/*-A.mov; do echo "$f"; PYTHONPATH=src .venv/bin/python -m codejam16.vision_cli "$f" --venue config/venue.json 2>local/clips/$(basename "$f").log | wc -l; done
+.venv/bin/python vision/eval_clips.py --dir local/clips/A
 ```
 
 Expected: the event counts match the table.
-- [ ] **Step 5: If any negative fires, adjust in this order:** tighten floor_box, set `confirmation_seconds` 2 → 3, set `down_angle_degrees` 30 → 20. Re-run A after each change.
-- [ ] **Step 6: Run the B takes once, without tuning.** Fill in `docs/detector-results.md`, one row per clip: Clip, Expected, Events, Delay from visibly down (s), Unknown frames. **Pass bar:** 0 on all negatives, exactly the expected count on positives.
+- [ ] **Step 5: If any negative fires, adjust in this order:** redraw the floor region, set `CONFIRM_DOWN_SECONDS` 2 → 3, set `DOWN_MAX_TORSO_DEG` 30 → 20 (both in `vision/config.py`). Re-run A after each change.
+- [ ] **Step 6: Run the B takes once, without tuning** (`vision/eval_clips.py --dir local/clips/B`). Fill in `docs/detector-results.md`, one row per clip: Clip, Expected, Events, Delay from visibly down (s), Unknown frames. **Pass bar:** 0 on all negatives, exactly the expected count on positives.
 - [ ] **Step 7: Commit** the results and config, open a PR and merge it.
 
 ### Task 14: Live camera proof
 
-- [ ] **Step 1: Prove wireless capture.** Unplug the iPhone and turn off Personal Hotspot on the camera phone and Internet Sharing on the Mac. Run `PYTHONPATH=src .venv/bin/python -m codejam16.capture_cli --camera-index N --frames 600`. Expected: frames are changing and there's no stall.
-- [ ] **Step 2: Run the full app live** with `--camera-index N --fallback-clip local/clips/lie-down-stay-B.mov`. Stage sit, bend, then lie down. Expected: exactly one East bar check.
+- [ ] **Step 1: Prove wireless capture.** Unplug the iPhone and turn off Personal Hotspot on the camera phone and Internet Sharing on the Mac. Run `.venv/bin/python vision/capture_probe.py --source N --frames 600`. Expected: frames are changing and there's no stall.
+- [ ] **Step 2: Run the full app live** with `--camera-index N --fallback-clip local/clips/B/lie-down-stay.mov`. Stage sit, bend, then lie down. Expected: exactly one East bar check.
 - [ ] **Step 3: Repeat over USB** as the backup.
 - [ ] **Step 4: Record the results.** Log the transport, index, fps and detection → screen time in `docs/rehearsal-log.md`. Point the fallback flag at the B take from now on.
 
@@ -404,10 +407,10 @@ Expected: the event counts match the table.
 
 - [ ] **Step 1: H10, Rehearsal 1.** Run the full BUILD-MAP §5 script with the real phones and log it. Each bug found becomes a failing test plus a fix on a `fix/…` branch before H12.
 - [ ] **Step 2: H15–16, Rehearsals 2 and 3.** Exercise the camera-dead-before-check fallback in at least one of them. Gate: 2 of 3 clean.
-- [ ] **Step 3: Venue pass (about 30 min, once the room is accessible).** Mount the phone, re-draw floor_box in `config/venue.json`, and run four live checks: sit, bend, lie down, stand up. Change config only. Log it.
+- [ ] **Step 3: Venue pass (about 30 min, once the room is accessible).** Mount the phone, re-draw the floor region with `vision/run.py --source N --calibrate`, and run four live checks: sit, bend, lie down, stand up. Change calibration and `vision/config.py` only. Log it.
 - [ ] **Step 4: Before the demo.** Delete `local/staff.sqlite3` for a clean state. Write the launch command on a sticky note. Put the fallback table from BUILD-MAP §5 next to the laptop.
 
 ### Task 17 (optional, only if someone is idle before H7): CI
 
-- [ ] **Step 1: Add the workflow.** Create `.github/workflows/tests.yml` running on `pull_request`: Python 3.12, `pip install Flask opencv-python-headless numpy`, then the test command. Every test must already avoid torch and YOLO.
+- [ ] **Step 1: Add the workflow.** Create `.github/workflows/tests.yml` running on `pull_request`: Python 3.12, `pip install Flask opencv-python-headless numpy pytest`, then the test command. Every test must already avoid torch and YOLO.
 - [ ] **Step 2: Check it works.** Open a PR. Expected: a green check. Merge it.

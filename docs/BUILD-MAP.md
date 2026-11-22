@@ -1,6 +1,8 @@
 # CodeJam16 build map
 
 > **Sections 3–4 are superseded by [the finish-and-demo plan](superpowers/plans/2026-11-21-codejam16-finish-and-demo.md).** Sections 2, 5 and 7 remain the reference. R5 in section 7 is decided in [the spec](superpowers/specs/2026-11-21-codejam16-finish-and-demo-design.md).
+>
+> **Computer vision is now owned by David in `vision/`** (see the [handoff](implementation-handoff.md)). The old CV code (`src/codejam16/capture.py`, `capture_cli.py`, `detector.py`, `pipeline.py`, `pose_trace.py`, `posec3d_cli.py`, `vision_cli.py`) and the PoseC3D experiment are retired. CV steps below point to `vision/` instead.
 
 Written 21 Nov 2026, 16:00. Single source of truth for what is left to build, test and demo.
 Baseline docs: [engineering plan](designs/live-venue-welfare-checks.md), [handoff](implementation-handoff.md), [locked UI](mockups/staff-app.html).
@@ -33,7 +35,7 @@ Baseline docs: [engineering plan](designs/live-venue-welfare-checks.md), [handof
 
 ### Measured detector evidence so far
 
-`local/rehearsal/laydown.MOV` replay: 272 frames, **1 event at 8.14 s**, 12.5 fps processing, **41 frames unknown due to `multiple_people`**. This is one positive clip. There are no negative clips (sit/bend) and no live run yet.
+`local/rehearsal/laydown.MOV` replay: 272 frames, **1 event at 8.14 s**, 12.5 fps processing, **41 frames unknown due to `multiple_people`**. This is one positive clip. There are no negative clips (sit/bend) and no live run yet. (This was the old `team/detector` code. Current `vision/` results are in G5.)
 
 ---
 
@@ -41,18 +43,18 @@ Baseline docs: [engineering plan](designs/live-venue-welfare-checks.md), [handof
 
 | # | Gap | Why it matters | Severity |
 | --- | --- | --- | --- |
-| G1 | **No runner connects capture → detector → store.** `vision_cli` is replay-only and uses its own `cv2.VideoCapture` rather than `capture.py`. The app hardcodes feed status as "Rehearsal mode". | No live check can appear on screens. This is the core demo. | Blocker |
-| G2 | **Zone mismatch.** The detector emits `zone_id="demo-area"`. The store fills `zone_name="East bar"` but keeps `zone_id=demo-area`, and the map pins are keyed on `east-bar` / `main-floor`, so **a real detection shows in the queue with no map pin.** | Supervisor map is half the demo | Blocker |
+| G1 | **No runner connects capture → detector → store.** `vision/run.py` runs live or replay through `vision/capture.py` and prints each alert as a JSON line with the fixture fields, but nothing feeds those into the store yet. The app hardcodes feed status as "Rehearsal mode". | No live check can appear on screens. This is the core demo. | Blocker |
+| G2 | **Zone mismatch.** `vision/` emits `zone_id="demo-area"` by default (`--zone-id`, or `ZONE_ID` in `vision/config.py`, changes it). The store fills `zone_name="East bar"` but keeps `zone_id=demo-area`, and the map pins are keyed on `east-bar` / `main-floor`, so **a real detection shows in the queue with no map pin.** | Supervisor map is half the demo | Blocker |
 | G3 | **No store/web tests.** The handoff's required proof (claim race, owner-only, refresh keeps assignment, rollback) isn't in the repo. | Judges/reviewers, regressions during last-minute edits | High |
 | G4 | **No feed-failure handling in the app**: no pre-check fallback to the clip, no post-check "camera offline". | The design's fallback plan depends on it | High |
-| G5 | **Detector unvalidated on negatives**: no sit/bend/crouch clips, no "already down at startup", floor box not calibrated to the demo camera position. | False alert on stage = worst outcome | High |
-| G6 | **Live camera never run through the detector.** The Continuity Camera proof (T1) isn't recorded. | Live demo dependency | High |
+| G5 | **Detector not yet validated from the demo camera position.** `vision/eval_clips.py` on 7 recorded clips (floor not calibrated): 0 alerts on sitting cross-legged, crouching and reaching for the floor, and one alert per down episode on the lie-down clips. "Already down at startup" is unit-tested. Still to do: calibrate the floor region at the demo position (`vision/run.py --calibrate`) and re-run. | False alert on stage = worst outcome | High |
+| G6 | **Live camera never run through the detector.** The Continuity Camera proof (T1) isn't recorded. Probe it with `vision/capture_probe.py --source N`. | Live demo dependency | High |
 | G7 | **Two Python stacks.** The detector is pinned to 3.12 + torch via `uv`. The staff app says "3.10+" with Flask only. There's no single environment that runs both. | The runner can't start | Medium |
 | G8 | **UI doesn't match the locked mockup.** There's no "Being resolved" state or teal pin for Accepted/Arrived, and "Closed" wording is missing. | Locked design decision | Medium |
-| G9 | **No latency/fps readout.** The design requires showing measured detection→screen time and detector fps. | Explicit success criterion | Medium |
+| G9 | **No latency readout.** The design requires showing measured detection→screen time and detector fps. `vision/run.py` already shows fps and ms/frame; detection→screen needs the app. | Explicit success criterion | Medium |
 | G10 | **Overdue demo**: default 300 s, and nothing seeds an overdue check on demand. | Success criterion; R5 says rehearsal-only | Low |
 | G11 | **Phone + private Wi-Fi never rehearsed** (T2). | Judge interaction | High (hardware) |
-| G12 | **`multiple_people` → unknown.** A bystander in frame before confirmation blocks detection. After confirmation the episode stays latched, which is correct. | Stage blocking rule | Low (procedure) |
+| G12 | **Bystanders.** Handled in `vision/`: if anyone is down the frame counts as down, so a bystander no longer blocks detection. With two confident people and nobody down the frame is unknown (`multiple_people`), so a responder can't rearm the detector. | Stage blocking rule | Resolved |
 
 Already solved, no work needed: atomic one-winner claim, owner-only transitions, outcomes, episode-ID dedupe, opaque session cookie + CSRF, stale-response sequencing in `staff.js`, stale/"Reconnecting" indicator, detector latch/rearm logic.
 
@@ -85,8 +87,8 @@ git fetch --prune
 **Merge order into `team/integration`** (each one a PR with the evidence the handoff asks for):
 
 1. `docs/locked-ui`
-2. `team/detector-posec3d`. It merges cleanly. Keep `posec3d_cli.py` as an isolated experiment, label it "not in demo" in the README, and keep its heavy deps out of the demo requirements.
-3. `team/staff-app`. Resolve the README conflict by keeping all three sections (Detector replay, Staff app, Capture probe).
+2. `team/vision` (capture + detector in `vision/`).
+3. `team/staff-app`. Resolve the README conflict by keeping all sections. Drop its copies of `src/codejam16/capture.py`, `capture_cli.py` and `tests/test_capture.py`; `vision/capture.py` replaces them.
 4. New `team/live` branch for Phase 1 below, then into integration.
 5. `team/integration` → `main` once the Phase 3 rehearsal passes. Demo from `main`.
 
@@ -96,22 +98,22 @@ After this, the only long-lived branches are `main` and `team/integration`. Feat
 
 ## 4. Build map
 
-Each task lists: **owner lane · files · done when**. D = detector person, S = staff-app person, C = capture/integration person.
+Each task lists: **owner lane · files · done when**. D = David (computer vision, `vision/`), S = staff-app person, C = integration person.
 
 ### Phase 0: one environment (C, 30 min) → fixes G7
 
-- [ ] **0.1** Standardise on Python 3.12 via `uv`. Add `requirements.txt` with `Flask>=3,<4`, `ultralytics==8.4.216`, `opencv-python==5.1.0.95`, `torch==2.15.0`, `torchvision==0.29.2`. Move the PoseC3D deps to `requirements-posec3d.txt`.
+- [ ] **0.1** Standardise on Python 3.12 via `uv`. Add `requirements.txt` with `Flask>=3,<4`, `ultralytics==8.4.216`, `opencv-python==5.1.0.95`, `torch==2.15.0`, `torchvision==0.29.2`. (PoseC3D is retired, so there are no extra requirements.)
 - [ ] **0.2** README "Quick start": one setup block, one test command, one launch command.
-- **Done when:** a fresh clone on the demo Mac runs `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests` → all green, and `yolo26n-pose.pt` is cached in `local/`.
+- **Done when:** a fresh clone on the demo Mac runs `.venv/bin/python -m pytest -q` → all green, and `yolo26n-pose.pt` is cached in `local/weights/`.
 
 ### Phase 1: wire the pipeline (C + D, 2–3 h) → fixes G1, G2, G4, G9
 
-- [ ] **1.1 Venue config** `config/venue.json`: `{ "cameras": { "demo-camera": { "zone_id": "east-bar", "zone_name": "East bar", "landmark": "Beside the side stairs", "floor_box": [0.10,0.62,0.95,0.98] } } }`. The store looks up zone name/landmark from `zone_id` instead of hardcoded defaults, and the detector takes `zone_id` from the config. **Done when** a replay event shows a pin at East bar.
-- [ ] **1.2 Detector worker** `src/codejam16/live.py`: a thread that opens `capture.open_camera(index)` or `capture.open_replay(path)`, feeds `PersonDownDetector.update(frame, timestamp_ms)`, and on an event calls `store.create_incident(event)`. It retries the insert with the same `episode_id` on failure. Load the model once at startup. A load failure sets feed status `detector_unavailable`.
-- [ ] **1.3 Bounded live buffer.** Confirm `_LiveCamera` keeps only the latest frame. If it queues, change it to keep 1 pending frame so we never infer on old video.
+- [ ] **1.1 Venue config** `config/venue.json`: `{ "cameras": { "demo-camera": { "zone_id": "east-bar", "zone_name": "East bar", "landmark": "Beside the side stairs" } } }`. The store looks up zone name/landmark from `zone_id` instead of hardcoded defaults, and `vision/` is launched with the same `--zone-id`. The floor region is not in this config: it lives in `local/calibration.json` (`vision/run.py --calibrate`). **Done when** a replay event shows a pin at East bar.
+- [ ] **1.2 Detector worker** `src/codejam16/live.py`: a thread that opens `vision/capture.py`'s `FrameSource(index_or_path)`, runs the pose model (`vision/pose.py`) and `PersonDownDetector.update_people(ts_ms, people)`, builds the event with `alert_event(...)`, and calls `store.create_incident(event)`. It retries the insert with the same `episode_id` on failure. Load the model once at startup. A load failure sets feed status `detector_unavailable`.
+- [x] **1.3 Bounded live buffer.** Done: `vision/capture.py` keeps only the latest frame and counts the dropped ones.
 - [ ] **1.4 Feed state** shared dict on the app (replace the hardcoded "Rehearsal mode"): `live | replay (labeled) | offline | detector_unavailable`, plus `fps`, `last_frame_at` and `source`. `/api/state` already passes `feed` through, so render it in the topbar pill + supervisor feed card.
 - [ ] **1.5 Failure policy** (from the design):
-  - `LiveFeedLost`/`CaptureOpenError` **before any check from this source**: build a fresh `PersonDownDetector` (clears pending evidence), switch to `open_replay(local/rehearsal-clip.mp4)` with `source="rehearsal clip"`, feed label "Rehearsal clip".
+  - `LiveFeedLost`/`CaptureOpenError` **before any check from this source**: build a fresh `PersonDownDetector` (clears pending evidence), switch to `FrameSource("local/rehearsal-clip.mp4")` (`vision/capture.py`) with `source="rehearsal clip"`, feed label "Rehearsal clip".
   - **After a check exists**: set `offline` and stop. The existing check stays actionable.
 - [ ] **1.6 Launch flags** on `codejam16.web.app`: `--camera-index N` | `--replay PATH` | `--no-detector`, plus `--fallback-clip PATH`. Starting the server starts exactly one worker (`use_reloader=False` is already set).
 - [ ] **1.7 Latency + fps.** The worker stamps `confirmed_at` (server UTC) on the event, and the store keeps it. The supervisor page records first-render time per incident and shows "Detection → screen: 1.3 s". The feed card shows detector fps. Measure on the laptop browser (same clock as the server).
@@ -140,7 +142,7 @@ Each task lists: **owner lane · files · done when**. D = detector person, S = 
   - Upright for the rearm interval then down again → second incident.
   - Feed lost before a check → replay fallback starts with a fresh detector.
   - Feed lost after a check → `offline`, and the check is still actionable.
-- [ ] **2.4** Detector tests the AGENTS.md already demands are mostly in `test_detector.py`. Add "already down at startup → one alert" if missing.
+- [x] **2.4** Done: `tests/vision/test_detector.py` covers the AGENTS.md cases, including "already down at startup → one alert".
 - **Done when:** one command runs everything green, and the README states it.
 
 ### Phase 3: UI alignment (S, 1–1.5 h) → fixes G8, G10
@@ -158,15 +160,15 @@ Each task lists: **owner lane · files · done when**. D = detector person, S = 
   - Positives: lower to the floor and stay down 10 s; start already lying down; stay down, get up and stand 5 s, go down again.
   - Edge: two people in frame.
   - Use different takes for tuning vs. checking.
-- [ ] **4.2** Calibrate `floor_box` from one frame of this camera and write it into `config/venue.json`.
-- [ ] **4.3** Run `vision_cli` on every clip. Fill this table and commit it as `docs/detector-results.md`:
+- [ ] **4.2** Calibrate the floor region with `vision/run.py --source N --calibrate` (saved to `local/calibration.json`).
+- [ ] **4.3** Run `vision/eval_clips.py --dir local/clips` on every clip. Fill this table and commit it as `docs/detector-results.md`:
 
   | Clip | Expected | Events | Delay from visibly down | Unknown frames |
   | --- | --- | --- | --- | --- |
 
   **Pass bar:** 0 events on all negatives, exactly 1 per down episode, second episode only after the rearm.
-- [ ] **4.4** If negatives fire: raise `confirmation_seconds` (2 → 3), tighten `down_angle_degrees` (30 → 20) and the floor box. Re-run only the *check* takes.
-- [ ] **4.5** Live: `capture_cli --camera-index N --frames 600` unplugged (Continuity wireless), then the full app with `--camera-index N`. Record transport, index, fps. Repeat over USB as the backup.
+- [ ] **4.4** If negatives fire: raise `CONFIRM_DOWN_SECONDS` (2 → 3), tighten `DOWN_MAX_TORSO_DEG` (30 → 20) in `vision/config.py`, and redraw the floor region. Re-run only the *check* takes.
+- [ ] **4.5** Live: `vision/capture_probe.py --source N --frames 600` unplugged (Continuity wireless), then the full app with `--camera-index N`. Record transport, index, fps. Repeat over USB as the backup.
 - **Done when:** the results table passes, and the live run makes one check from a staged lie-down.
 
 ### Phase 5: network + devices (C + S, 45 min, hardware) → fixes G11
@@ -224,10 +226,10 @@ Before starting: the app is running with `--camera-index N --fallback-clip local
 
 ## 6. Out of scope for the demo (do not start)
 
-PoseC3D/nausea detection (stays on its branch as an experiment), Gemini clip review, multi-person tracking, multiple cameras, automatic dispatch, public deployment, CI.
+PoseC3D/nausea detection (retired), Gemini clip review, multi-person tracking, multiple cameras, automatic dispatch, public deployment, CI.
 
 ## 7. Open decisions for the team
 
 1. **R5: overdue in the live demo?** The design says rehearsal-only. Recommendation: show it on the labelled Main floor sample with `CODEJAM_OVERDUE_SECONDS=60`, since it costs 10 seconds of stage time.
-2. **Who owns `team/live`** (P1)? It touches capture, detector and app, so one person should drive it.
-3. **What's in the `codejam16-live` worktree?** If someone already started the P1 runner there, rebase that work onto the cleaned integration branch instead of starting over.
+2. **Who owns `team/live`** (P1)? The capture + detector side is David's (`vision/`). Agree with him which side owns the worker.
+3. **What's in the `codejam16-live` worktree?** Resolved: its `pipeline.py` runner is retired. Build P1 on `vision/`.

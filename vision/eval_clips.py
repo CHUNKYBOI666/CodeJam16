@@ -11,52 +11,52 @@ first frame the detector classified as DOWN in that episode to the confirming fr
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import sys
 import time
 from pathlib import Path
-
-import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import config  # noqa: E402
 from calibration import load_floor_polygon  # noqa: E402
+from capture import CaptureError, FrameSource  # noqa: E402
 from detector import PersonDownDetector, Posture  # noqa: E402
-from pose import REPO_ROOT, load_model, pick_device, predict, primary_keypoints, warm_up  # noqa: E402
+from pose import REPO_ROOT, load_model, pick_device, people_from_result, predict, warm_up  # noqa: E402
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 
 
 def eval_clip(path: Path, model, device: str, calibration: str) -> dict:
-    cap = cv2.VideoCapture(str(path))
-    if not cap.isOpened():
-        return {"clip": path.name, "error": "could not open"}
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    floor = load_floor_polygon(calibration, w, h)
-    warm_up(model, device, w, h, passes=1)
-    det = PersonDownDetector(floor_polygon=floor)
-    alerts, frames, unknown, infer_ms = [], 0, 0, 0.0
-    while True:
-        ok, img = cap.read()
-        if not ok:
-            break
-        ts_ms = frames * 1000.0 / fps
-        t0 = time.perf_counter()
-        xy, conf = primary_keypoints(predict(model, img, device))
-        infer_ms += (time.perf_counter() - t0) * 1000.0
-        status = det.update(ts_ms, xy, conf)
-        if status.reading.posture is Posture.UNKNOWN:
-            unknown += 1
-        if status.alert:
-            alerts.append(status.alert)
-        frames += 1
-    cap.release()
+    alerts, frames, infer_ms, last_ms = [], 0, 0.0, 0.0
+    reasons: Counter[str] = Counter()
+    floor = None
+    try:
+        with FrameSource(path, realtime=False) as src:
+            src.wait_ready()
+            floor = load_floor_polygon(calibration, src.width, src.height)
+            warm_up(model, device, src.width, src.height, passes=1)
+            det = PersonDownDetector(floor_polygon=floor, frame_size=(src.width, src.height))
+            src.start()
+            while (frame := src.latest()) is not None:
+                t0 = time.perf_counter()
+                people = people_from_result(predict(model, frame.image, device))
+                infer_ms += (time.perf_counter() - t0) * 1000.0
+                status = det.update_people(frame.ts_ms, people)
+                if status.reading.posture is Posture.UNKNOWN:
+                    reasons[status.reading.reason.value] += 1
+                if status.alert:
+                    alerts.append(status.alert)
+                frames += 1
+                last_ms = frame.ts_ms
+    except CaptureError as err:
+        return {"clip": path.name, "error": f"{type(err).__name__}: {err} (after {frames} frames)"}
     return {
         "clip": path.name,
-        "seconds": frames / fps,
+        "seconds": last_ms / 1000.0,
         "frames": frames,
-        "unknown": unknown,
+        "unknown": sum(reasons.values()),
+        "reasons": reasons,
         "ms": infer_ms / max(frames, 1),
         "alerts": alerts,
         "floor": floor is not None,
@@ -99,6 +99,13 @@ def main() -> None:
         ) or "-"
         unk = 100.0 * r["unknown"] / max(r["frames"], 1)
         print(f"{r['clip']:28s} {r['seconds']:6.1f} {unk:5.0f} {r['ms']:5.1f} {len(r['alerts']):6d}  {detail}")
+
+    print("\nunknown frames by reason")
+    for r in rows:
+        if "error" in r or not r["reasons"]:
+            continue
+        parts = ", ".join(f"{k}={v}" for k, v in r["reasons"].most_common())
+        print(f"  {r['clip']:28s} {parts}")
 
 
 if __name__ == "__main__":

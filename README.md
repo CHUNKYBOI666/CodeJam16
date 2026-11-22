@@ -1,6 +1,44 @@
 # CodeJam16
 
-See the [three-person implementation handoff](docs/implementation-handoff.md) for branch ownership, shared interfaces, and review steps.
+See the [implementation handoff](docs/implementation-handoff.md) for branch ownership, shared interfaces, and review steps.
+
+## Layout
+
+| Path | What | Owner |
+| --- | --- | --- |
+| `vision/` | Capture + person-down detector: camera/clip capture, pose model, posture rule, calibration, overlay, clip evaluation | David |
+| `tests/vision/` | Capture, detector and calibration tests | David |
+| `backend/`, `frontend/` | Staff web app: Flask + SQLite backend, staff screens (responder queue, supervisor map) | Teammate |
+
+## Setup (Python 3.12)
+
+```bash
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
+```
+
+## Pose overlay
+
+```bash
+.venv/bin/python vision/run.py --source 0                    # webcam
+.venv/bin/python vision/run.py --source clips/lying_down_twice.mp4   # recording (paced at real time)
+```
+
+Calibrate the floor region once per camera placement (click corners on the first frame, Enter to save to `local/calibration.json`):
+
+```bash
+.venv/bin/python vision/run.py --source clips/lying_down_twice.mp4 --calibrate
+```
+
+Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dropping), `--device cpu`,
+`--constant-fps 30` (files whose decoder reports no usable media timestamps), `--stall-timeout 5`.
+Weights download to `local/weights/` on first run. `clips/` and `local/` are git-ignored.
+
+Alerts are printed to stdout as one JSON object per line, with the fields of
+`fixtures/person-down.json`; logs go to stderr. Set the ids with `--camera-id` and `--zone-id`:
+
+```bash
+.venv/bin/python vision/run.py --source 0 --zone-id east-bar > local/alerts.jsonl
+```
 
 ## Where things live
 
@@ -14,15 +52,11 @@ See the [three-person implementation handoff](docs/implementation-handoff.md) fo
 
 ## Capture probe on macOS
 
-Use Python 3.10 or newer with a compatible OpenCV wheel. From the repository root:
+Checks that a camera or clip delivers changing frames, without running the pose model:
 
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install opencv-python
-python -m pytest -q tests/vision/test_capture.py
-python vision/capture_cli.py --file local/rehearsal.mp4 --frames 30
-python vision/capture_cli.py --camera-index 0 --frames 120
+```bash
+.venv/bin/python vision/capture_probe.py --source clips/lying_down_twice.mp4 --frames 30
+.venv/bin/python vision/capture_probe.py --source 0 --frames 120
 ```
 
 Use a staged local clip with movement. If the decoder does not expose increasing
@@ -45,37 +79,16 @@ for the interruption check.
 
 If wireless is unreliable, connect a data-capable USB cable, trust the Mac if
 prompted, and repeat the probe. Record the command, Python and OpenCV versions,
-camera index, transport, and result for each run. Keep clips in `local/`.
+camera index, transport, and result for each run. Keep clips in `clips/`.
 
-Capture reports a startup failure if no usable frame arrives within five
-seconds. After startup, a failed read or a five-second gap ends the live source.
+Capture (`vision/capture.py`) reports a startup failure if no usable frame arrives
+within five seconds. After startup, a failed read or a five-second gap ends the
+live source (`--stall-timeout` changes the limit); `vision/run.py` then exits with code 2.
 If the native read does not return, the caller still receives the timeout and
 can open a replay. A stuck native reader may require restarting the process
 before reopening the camera. At integration, the caller shows the camera as
 offline, starts labeled replay with fresh detector timing if no check exists
 yet, or lets staff finish an existing check.
-
-## Setup (Python 3.12)
-
-```bash
-uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
-```
-
-## Pose overlay
-
-```bash
-.venv/bin/python vision/run.py --source 0                    # webcam
-.venv/bin/python vision/run.py --source clips/lie_down.mp4   # recording (paced at real time)
-```
-
-Calibrate the floor region once per camera placement (click corners on the first frame, Enter to save to `local/calibration.json`):
-
-```bash
-.venv/bin/python vision/run.py --source clips/lie_down.mp4 --calibrate
-```
-
-Flags: `--no-show`, `--save local/out.mp4`, `--every-frame` (files: no frame dropping), `--device cpu`.
-Weights download to `local/weights/` on first run. `clips/` and `local/` are git-ignored.
 
 ## Tests and clip evaluation
 
