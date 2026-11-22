@@ -40,6 +40,16 @@ Alerts are printed to stdout as one JSON object per line, with the fields of
 .venv/bin/python vision/run.py --source 0 --zone-id east-bar > local/alerts.jsonl
 ```
 
+## Where things live
+
+| Folder | What it holds |
+| --- | --- |
+| `vision/` | Everything that sees: camera and clip capture, pose, calibration, the person-down detector, the overlay runner, clip evaluation |
+| `tests/vision/` | Tests for `vision/`. They need no camera and no model weights |
+| `backend/`, `frontend/` | The Flask app and staff screens. They arrive when the staff app lands on `main` |
+| `docs/`, `fixtures/` | Design docs and plans; the shared incident event example |
+| `local/`, `clips/` | Git-ignored: recordings, weights, calibration, databases |
+
 ## Capture probe on macOS
 
 Checks that a camera or clip delivers changing frames, without running the pose model:
